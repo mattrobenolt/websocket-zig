@@ -44,7 +44,11 @@ pub fn main() !void {
             continue;
         };
 
-        const thread = std.Thread.spawn(.{}, handleConnectionThread, .{ allocator, conn.stream }) catch |err| {
+        const thread = std.Thread.spawn(
+            .{},
+            handleConnectionThread,
+            .{ allocator, conn.stream },
+        ) catch |err| {
             print("thread spawn error: {}\n", .{err});
             conn.stream.close();
             continue;

@@ -4,7 +4,12 @@ IO-agnostic WebSocket frame parser and serializer in Zig. Zero allocations, no I
 
 ## Architecture
 
-- `src/root.zig` — the library. A `feed()`-style streaming frame parser, frame header serializer, masking, and close frame helpers. No IO, no allocations — callers provide all buffers. This is a frame-level parser — it does not track multi-frame message state (fragmentation sequencing is the caller's responsibility).
+- `src/root.zig` — library entry point. Re-exports the public API and contains the `writeFrame`/`writeClose`/`writePing`/`writePong` helpers.
+- `src/frame.zig` — core types (`Opcode`, `RsvBits`, `FrameHeader`, `Mask`, `Event`, `ParseError`), `BoundedBuffer`, and `readInt`/`writeInt` helpers.
+- `src/parse.zig` — streaming `Parser` (server/client), `MessageValidator`, and `FrameHandler` (higher-level message-oriented API).
+- `src/close.zig` — `CloseCode`, `ClosePayload`, `parseClosePayload`.
+- `src/handshake.zig` — `computeAcceptKey`, `UpgradeRequest`, `validateUpgradeRequest`, `UpgradeResponse`.
+- `src/MessageWriter.zig` — fragmented message writer (file-as-struct).
 - `test/echo_server.zig` — test scaffolding only. A minimal echo server for running the Autobahn conformance suite. Not part of the library.
 - `examples/blocking-echo.zig` — single-threaded blocking echo server using `std.net` and `std.Io`. Simplest possible integration.
 - `examples/http-upgrade.zig` — thread-per-connection HTTP server using `std.http.Server` with WebSocket upgrade on `/ws` and a static HTML page on `/`. Uses `@embedFile` for the HTML.
