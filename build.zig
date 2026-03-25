@@ -9,14 +9,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
-    // --- Library tests ---
     const mod_tests = b.addTest(.{ .root_module = mod });
     const run_mod_tests = b.addRunArtifact(mod_tests);
-
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_mod_tests.step);
 
-    // --- Echo server (Autobahn test scaffolding) ---
     const echo_server = b.addExecutable(.{
         .name = "echo-server",
         .root_module = b.createModule(.{
@@ -39,7 +36,6 @@ pub fn build(b: *std.Build) void {
     const echo_step = b.step("echo-server", "Run the Autobahn echo server");
     echo_step.dependOn(&echo_run.step);
 
-    // --- Examples ---
     const examples_step = b.step("examples", "Build all examples");
 
     const blocking_echo = b.addExecutable(.{
@@ -70,7 +66,6 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(http_upgrade);
     examples_step.dependOn(&http_upgrade.step);
 
-    // --- Conformance (Autobahn test suite via Docker) ---
     const run_autobahn = b.path("scripts/run-autobahn.sh").getPath(b);
 
     const conformance_script = b.addSystemCommand(&.{
@@ -84,7 +79,6 @@ pub fn build(b: *std.Build) void {
     const conformance_step = b.step("conformance", "Run the Autobahn conformance test suite");
     conformance_step.dependOn(&conformance_script.step);
 
-    // libxev example and conformance — only when the lazy dependency is available.
     if (b.lazyDependency("libxev", .{})) |xev_dep| {
         const xev_echo = b.addExecutable(.{
             .name = "xev-echo",
