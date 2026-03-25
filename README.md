@@ -4,6 +4,8 @@ IO-agnostic WebSocket frame parser and serializer for Zig. Zero allocations, no 
 
 Implements [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455). Passes the [Autobahn test suite](https://github.com/crossbario/autobahn-testsuite).
 
+Requires Zig 0.15.
+
 ## Usage
 
 Add the dependency:
@@ -89,6 +91,17 @@ const header: ws.FrameHeader.Buffer = .init(.{
     .payload_len = payload.len,
 });
 // header.constSlice() returns the wire bytes.
+```
+
+### Fragmented Messages
+
+`MessageWriter` streams a message across multiple frames, managing continuation opcodes automatically:
+
+```zig
+var msg: ws.MessageWriter = .init(writer, .text);
+try msg.writeChunk(part1);
+try msg.writeChunk(part2);
+try msg.finish(part3);
 ```
 
 ### Masking
