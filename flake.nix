@@ -30,6 +30,7 @@
             zls_0_15
             ziglint
             zigdoc
+            just
             python3
           ];
         };
