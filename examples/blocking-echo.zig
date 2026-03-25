@@ -129,25 +129,28 @@ const EchoHandler = struct {
             reader.fill(1) catch return;
             const buf = reader.buffered();
             if (buf.len == 0) return;
-            if (!try self.processBuffer(gpa, buf, writer)) return;
+            const status = try self.processFrames(gpa, buf, writer);
+            try writer.flush();
+            if (status == .close) return;
             // Advance the reader past the bytes we consumed.
             reader.toss(buf.len);
         }
     }
 
+    const Status = enum { continue_reading, close };
+
     /// Feed a buffer of bytes through the handler and act on each message.
-    /// Returns false if the connection should close.
-    fn processBuffer(
+    fn processFrames(
         self: *EchoHandler,
         gpa: Allocator,
         input: []u8,
         writer: *Io.Writer,
-    ) !bool {
+    ) !Status {
         var data = input;
         while (true) {
             const result = self.handler.feed(data) catch {
                 try ws.writeClose(writer, .protocol_error);
-                return false;
+                return .close;
             };
             data = data[result.consumed..];
 
@@ -159,16 +162,16 @@ const EchoHandler = struct {
                     try ws.writeFrame(writer, end.opcode, self.msg.items);
                     self.msg.clearRetainingCapacity();
                 },
-                .ping => |payload| try ws.writeFrame(writer, .pong, payload),
+                .ping => |payload| try ws.writePong(writer, payload),
                 .pong => {},
                 .close => |payload| {
                     try ws.writeFrame(writer, .close, payload);
-                    return false;
+                    return .close;
                 },
                 .need_more => break,
             }
         }
-        return true;
+        return .continue_reading;
     }
 };
 

@@ -91,23 +91,26 @@ const EchoHandler = struct {
             reader.fill(1) catch return;
             const buf = reader.buffered();
             if (buf.len == 0) return;
-            const consumed = try self.processBuffer(gpa, buf, writer) orelse return;
-            reader.toss(consumed);
+            const status = try self.processFrames(gpa, buf, writer);
+            try writer.flush();
+            if (status == .close) return;
+            reader.toss(buf.len);
         }
     }
 
-    /// Returns number of bytes consumed, or null if the connection should close.
-    fn processBuffer(
+    const Status = enum { continue_reading, close };
+
+    fn processFrames(
         self: *EchoHandler,
         gpa: Allocator,
         input: []u8,
         writer: *Io.Writer,
-    ) Error!?usize {
+    ) Error!Status {
         var data = input;
         while (true) {
             const result = self.handler.feed(data) catch {
                 try ws.writeClose(writer, .protocol_error);
-                return null;
+                return .close;
             };
             data = data[result.consumed..];
 
@@ -115,39 +118,39 @@ const EchoHandler = struct {
                 .data => |payload| {
                     self.msg.appendSlice(gpa, payload) catch {
                         try ws.writeClose(writer, .too_big);
-                        return null;
+                        return .close;
                     };
                 },
                 .data_end => |end| {
                     if (end.opcode == .text) {
                         if (!std.unicode.utf8ValidateSlice(self.msg.items)) {
                             try ws.writeClose(writer, .invalid_payload);
-                            return null;
+                            return .close;
                         }
                     }
                     try ws.writeFrame(writer, end.opcode, self.msg.items);
                     self.msg.clearRetainingCapacity();
                 },
-                .ping => |payload| try ws.writeFrame(writer, .pong, payload),
+                .ping => |payload| try ws.writePong(writer, payload),
                 .pong => {},
                 .close => |payload| {
                     if (ws.parseClosePayload(payload)) |close_payload_opt| {
                         if (close_payload_opt) |close_payload| {
                             if (!std.unicode.utf8ValidateSlice(close_payload.reason)) {
                                 try ws.writeClose(writer, .invalid_payload);
-                                return null;
+                                return .close;
                             }
                         }
                         try ws.writeFrame(writer, .close, payload);
                     } else |_| {
                         try ws.writeClose(writer, .protocol_error);
                     }
-                    return null;
+                    return .close;
                 },
                 .need_more => break,
             }
         }
-        return input.len - data.len;
+        return .continue_reading;
     }
 };
 

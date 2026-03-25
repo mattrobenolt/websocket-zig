@@ -39,7 +39,7 @@ while (true) {
         .data_end => |end| {
             // Complete message received. end.opcode is .text or .binary.
         },
-        .ping => |payload| try ws.writeFrame(writer, .pong, payload),
+        .ping => |payload| try ws.writePong(writer, payload),
         .pong => {},
         .close => |payload| {
             try ws.writeFrame(writer, .close, payload);

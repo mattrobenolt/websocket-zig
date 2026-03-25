@@ -179,52 +179,67 @@ fn echoLoop(
         const buf = reader.buffered();
         if (buf.len == 0) return;
 
-        // Feed all available bytes through the frame handler.
-        var data = buf;
-        var should_close = false;
-        while (true) {
-            const result = handler.feed(data) catch {
-                // Parse or validation error — close with protocol error.
-                try ws.writeClose(writer, .protocol_error);
-                return;
-            };
-            data = data[result.consumed..];
-
-            switch (result.message) {
-                // Payload chunk — accumulate until the message is complete.
-                .data => |payload| {
-                    try msg.appendSlice(gpa, payload);
-                },
-
-                // Complete message — echo it back to the client.
-                .data_end => |end| {
-                    try ws.writeFrame(writer, end.opcode, msg.items);
-                    msg.clearRetainingCapacity();
-                },
-
-                // Ping — respond with pong (same payload).
-                .ping => |payload| try ws.writeFrame(writer, .pong, payload),
-
-                // Pong — nothing to do.
-                .pong => {},
-
-                // Close — echo the close frame and shut down.
-                .close => |payload| {
-                    try ws.writeFrame(writer, .close, payload);
-                    should_close = true;
-                    break;
-                },
-
-                // Need more data — break out and read again.
-                .need_more => break,
-            }
-        }
-
-        // Advance the reader past the bytes we consumed.
+        // Process all frames in this buffer. The defer ensures we always
+        // flush and advance the reader, regardless of how we exit.
+        const status = try processFrames(gpa, &handler, &msg, buf, writer);
+        try writer.flush();
         reader.toss(buf.len);
 
-        if (should_close) return;
+        if (status == .close) return;
     }
+}
+
+const Status = enum { continue_reading, close };
+
+/// Feed a buffer through the frame handler and act on each message.
+fn processFrames(
+    gpa: Allocator,
+    handler: *ws.ServerFrameHandler,
+    msg: *std.ArrayList(u8),
+    input: []u8,
+    writer: *Io.Writer,
+) Io.Writer.Error!Status {
+    var data = input;
+    while (true) {
+        const result = handler.feed(data) catch {
+            // Parse or validation error — close with protocol error.
+            try ws.writeClose(writer, .protocol_error);
+            return .close;
+        };
+        data = data[result.consumed..];
+
+        switch (result.message) {
+            // Payload chunk — accumulate until the message is complete.
+            .data => |payload| {
+                msg.appendSlice(gpa, payload) catch {
+                    try ws.writeClose(writer, .too_big);
+                    return .close;
+                };
+            },
+
+            // Complete message — echo it back to the client.
+            .data_end => |end| {
+                try ws.writeFrame(writer, end.opcode, msg.items);
+                msg.clearRetainingCapacity();
+            },
+
+            // Ping — respond with pong (same payload).
+            .ping => |payload| try ws.writePong(writer, payload),
+
+            // Pong — nothing to do.
+            .pong => {},
+
+            // Close — echo the close frame and shut down.
+            .close => |payload| {
+                try ws.writeFrame(writer, .close, payload);
+                return .close;
+            },
+
+            // Need more data — break out and read again.
+            .need_more => break,
+        }
+    }
+    return .continue_reading;
 }
 
 fn parsePort() u16 {
