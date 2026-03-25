@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><title>WebSocket Echo</title></head>
+<body>
+<h1>WebSocket Echo</h1>
+<input id="msg" value="Hello, WebSocket!" />
+<button id="btn" onclick="send()" disabled>Send</button>
+<pre id="log"></pre>
+<script>
+const log = document.getElementById('log');
+const ws = new WebSocket('ws://' + location.host + '/ws');
+ws.onopen = () => { document.getElementById('btn').removeAttribute('disabled'); log.textContent += 'Connected\n'; };
+ws.onclose = () => log.textContent += 'Disconnected\n';
+ws.onmessage = e => log.textContent += '< ' + e.data + '\n';
+function send() {
+  const msg = document.getElementById('msg').value;
+  ws.send(msg);
+  log.textContent += '> ' + msg + '\n';
+}
+</script>
+</body>
+</html>

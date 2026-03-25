@@ -1,0 +1,6 @@
+.{
+    .paths = .{ "src", "test", "build.zig", "examples" },
+    .rules = .{
+        .Z024 = .{ .max_length = 100 },
+    },
+}
