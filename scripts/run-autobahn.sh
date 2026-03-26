@@ -23,7 +23,7 @@ else
 fi
 
 AUTOBAHN_CONFIG=$(mktemp)
-cat > "$AUTOBAHN_CONFIG" <<EOF
+cat >"$AUTOBAHN_CONFIG" <<EOF
 {
     "outdir": "/reports",
     "servers": [{"agent": "$AGENT_NAME", "url": "ws://$HOST_IP:$SERVER_PORT"}],
@@ -54,7 +54,7 @@ fi
 mkdir -p "$REPORTS_DIR"
 
 echo "Running Autobahn against ws://$HOST_IP:$SERVER_PORT..."
-timeout 600 docker run --rm \
+timeout 900 docker run --rm \
     -v "$AUTOBAHN_CONFIG:/config/fuzzingclient.json:ro" \
     -v "$REPORTS_DIR:/reports" \
     crossbario/autobahn-testsuite \

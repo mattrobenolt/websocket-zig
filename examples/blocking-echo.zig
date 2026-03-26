@@ -78,7 +78,7 @@ fn handleConnection(gpa: Allocator, stream: std.net.Stream) !void {
 
             // The library computes the Sec-WebSocket-Accept hash and
             // formats the complete HTTP 101 response into a buffer.
-            const resp: ws.UpgradeResponse = .init(key);
+            const resp: ws.UpgradeResponse = .init(.{ .key = key });
             try resp.write(writer);
             try writer.flush();
 
@@ -107,7 +107,7 @@ const EchoHandler = struct {
     msg: std.ArrayList(u8),
 
     const init: EchoHandler = .{
-        .handler = .init,
+        .handler = .init(.{}),
         .msg = .empty,
     };
 
@@ -159,13 +159,13 @@ const EchoHandler = struct {
                     try self.msg.appendSlice(gpa, payload);
                 },
                 .data_end => |end| {
-                    try ws.writeFrame(writer, end.opcode, self.msg.items);
+                    try ws.writeFrame(writer, self.msg.items, .{ .opcode = end.opcode });
                     self.msg.clearRetainingCapacity();
                 },
                 .ping => |payload| try ws.writePong(writer, payload),
                 .pong => {},
                 .close => |payload| {
-                    try ws.writeFrame(writer, .close, payload);
+                    try ws.writeFrame(writer, payload, .{ .opcode = .close });
                     return .close;
                 },
                 .need_more => break,

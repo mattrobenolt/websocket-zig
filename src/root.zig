@@ -11,7 +11,7 @@
 //! loop until `need_more` is returned:
 //!
 //! ```
-//! var parser: websocket.ServerParser = .init;
+//! var parser: websocket.ServerParser = .init(.{});
 //! while (true) {
 //!     const result = try parser.feed(buf);
 //!     buf = buf[result.consumed..];
@@ -32,6 +32,7 @@ const close = @import("close.zig");
 pub const CloseCode = close.CloseCode;
 pub const ClosePayload = close.ClosePayload;
 pub const parseClosePayload = close.parseClosePayload;
+pub const Extension = @import("extension.zig").Extension;
 const frame = @import("frame.zig");
 pub const MaskKey = frame.MaskKey;
 pub const Opcode = frame.Opcode;
@@ -47,22 +48,30 @@ pub const validateUpgradeRequest = handshake.validateUpgradeRequest;
 pub const UpgradeResponse = handshake.UpgradeResponse;
 pub const MessageWriter = @import("MessageWriter.zig");
 const parse = @import("parse.zig");
+pub const Options = parse.Options;
 pub const ServerParser = parse.ServerParser;
 pub const ClientParser = parse.ClientParser;
 pub const MessageValidator = parse.MessageValidator;
 pub const ServerFrameHandler = parse.ServerFrameHandler;
 pub const ClientFrameHandler = parse.ClientFrameHandler;
 
+pub const WriteFrameOptions = struct {
+    opcode: Opcode,
+    compressed: bool = false,
+};
+
 /// Write a complete frame (header + payload) to `writer`. The caller is
 /// responsible for flushing when ready — this allows batching multiple
 /// frames before a single flush.
 pub fn writeFrame(
     writer: *Io.Writer,
-    opcode: Opcode,
     payload: []const u8,
+    options: WriteFrameOptions,
 ) Io.Writer.Error!void {
+    const rsv: RsvBits = if (options.compressed) .{ .rsv1 = true } else .{};
     const header: FrameHeader.Buffer = .init(.{
-        .opcode = opcode,
+        .opcode = options.opcode,
+        .rsv = rsv,
         .payload_len = payload.len,
     });
     try header.write(writer);
@@ -75,7 +84,7 @@ pub fn writeClose(
     code: CloseCode,
 ) Io.Writer.Error!void {
     const body = code.toBytes();
-    try writeFrame(writer, .close, &body);
+    try writeFrame(writer, &body, .{ .opcode = .close });
 }
 
 /// Write a ping frame with an optional payload.
@@ -83,7 +92,7 @@ pub fn writePing(
     writer: *Io.Writer,
     payload: []const u8,
 ) Io.Writer.Error!void {
-    try writeFrame(writer, .ping, payload);
+    try writeFrame(writer, payload, .{ .opcode = .ping });
 }
 
 /// Write a pong frame with the given payload (typically echoed from a ping).
@@ -91,7 +100,7 @@ pub fn writePong(
     writer: *Io.Writer,
     payload: []const u8,
 ) Io.Writer.Error!void {
-    try writeFrame(writer, .pong, payload);
+    try writeFrame(writer, payload, .{ .opcode = .pong });
 }
 
 test {

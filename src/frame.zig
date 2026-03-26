@@ -133,6 +133,11 @@ pub const RsvBits = packed struct(u3) {
     pub fn areSet(self: RsvBits) bool {
         return @as(u3, @bitCast(self)) != 0;
     }
+
+    /// Returns true if any bit is set that is not in `allowed`.
+    pub fn hasDisallowed(self: RsvBits, allowed: RsvBits) bool {
+        return @as(u3, @bitCast(self)) & ~@as(u3, @bitCast(allowed)) != 0;
+    }
 };
 
 /// Decoded WebSocket frame header (RFC 6455 Section 5.2).
@@ -587,6 +592,29 @@ test "FrameHeader.Buffer: RSV bits set" {
         });
         try testing.expectEqual(@as(u8, 0x80 | 0x70 | 0x02), header.constSlice()[0]);
     }
+}
+
+test "RsvBits.hasDisallowed: no bits set passes any allowed" {
+    const rsv: RsvBits = .empty;
+    try testing.expect(!rsv.hasDisallowed(.empty));
+    try testing.expect(!rsv.hasDisallowed(.{ .rsv1 = true }));
+}
+
+test "RsvBits.hasDisallowed: allowed bit passes" {
+    const rsv: RsvBits = .{ .rsv1 = true };
+    try testing.expect(!rsv.hasDisallowed(.{ .rsv1 = true }));
+}
+
+test "RsvBits.hasDisallowed: disallowed bit fails" {
+    const rsv: RsvBits = .{ .rsv1 = true };
+    try testing.expect(rsv.hasDisallowed(.empty));
+    try testing.expect(rsv.hasDisallowed(.{ .rsv2 = true }));
+}
+
+test "RsvBits.hasDisallowed: mixed bits" {
+    const rsv: RsvBits = .{ .rsv1 = true, .rsv2 = true };
+    try testing.expect(!rsv.hasDisallowed(.{ .rsv1 = true, .rsv2 = true }));
+    try testing.expect(rsv.hasDisallowed(.{ .rsv1 = true }));
 }
 
 test "FrameHeader.Buffer: RFC 6455 Section 5.7 - unmasked text 'Hello'" {

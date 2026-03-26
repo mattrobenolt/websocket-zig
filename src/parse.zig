@@ -6,6 +6,8 @@ const mem = std.mem;
 const close = @import("close.zig");
 const CloseCode = close.CloseCode;
 const parseClosePayload = close.parseClosePayload;
+const extension = @import("extension.zig");
+pub const Extension = extension.Extension;
 const frame = @import("frame.zig");
 const Opcode = frame.Opcode;
 const RsvBits = frame.RsvBits;
@@ -19,6 +21,10 @@ const ControlBuffer = frame.ControlBuffer;
 const max_header_len = frame.max_header_len;
 const readInt = frame.readInt;
 const writeInt = frame.writeInt;
+
+pub const Options = struct {
+    extension: ?Extension = null,
+};
 
 /// Tracks fragmented message state across frames. Call `check` with each
 /// frame_header event to validate RFC 6455 Section 5.4 fragmentation rules.
@@ -71,6 +77,7 @@ fn Parser(comptime is_server: bool) type {
         const Self = @This();
 
         state: State,
+        allowed_rsv: RsvBits,
 
         const State = union(enum) {
             header: HeaderBuffer,
@@ -81,10 +88,13 @@ fn Parser(comptime is_server: bool) type {
             frame_end,
         };
 
-        /// Initial parser state, ready for the first frame.
-        pub const init: Self = .{
-            .state = .{ .header = .empty },
-        };
+        /// Create a parser with the given options.
+        pub fn init(options: Options) Self {
+            return .{
+                .state = .{ .header = .empty },
+                .allowed_rsv = Extension.allowedRsv(options.extension),
+            };
+        }
 
         /// The return value of `feed`: how many input bytes were consumed and the resulting event.
         pub const FeedResult = struct {
@@ -127,7 +137,7 @@ fn Parser(comptime is_server: bool) type {
                     const masked = (byte1 & 0x80) != 0;
                     const len7: u7 = @truncate(byte1);
 
-                    if (rsv.areSet()) return error.ReservedRsvBit;
+                    if (rsv.hasDisallowed(self.allowed_rsv)) return error.ReservedRsvBit;
                     if (opcode.isReserved()) return error.ReservedOpcode;
 
                     var idx: usize = 2;
@@ -223,10 +233,9 @@ fn Parser(comptime is_server: bool) type {
             return required;
         }
 
-        /// Reset the parser to its initial state, ready for a new
-        /// frame sequence.
+        /// Reset the parser to its initial state, preserving options.
         pub fn reset(self: *Self) void {
-            self.* = init;
+            self.state = .{ .header = .empty };
         }
     };
 }
@@ -248,7 +257,7 @@ pub const ClientFrameHandler = FrameHandler(false);
 /// input buffer. Control payloads are accumulated in an internal 125-byte buffer.
 ///
 /// ```
-/// var handler: websocket.ServerFrameHandler = .init;
+/// var handler: websocket.ServerFrameHandler = .init(.{});
 /// while (true) {
 ///     const result = try handler.feed(buf);
 ///     buf = buf[result.consumed..];
@@ -270,18 +279,22 @@ fn FrameHandler(comptime is_server: bool) type {
         validator: MessageValidator,
         ctrl: ControlBuffer,
         msg_opcode: Opcode,
+        msg_compressed: bool,
         cur_opcode: Opcode,
         cur_fin: bool,
 
-        /// Initial state, ready for the first frame.
-        pub const init: Self = .{
-            .parser = .init,
-            .validator = .init,
-            .ctrl = .empty,
-            .msg_opcode = .continuation,
-            .cur_opcode = .continuation,
-            .cur_fin = false,
-        };
+        /// Create a handler with the given options.
+        pub fn init(options: Options) Self {
+            return .{
+                .parser = .init(options),
+                .validator = .init,
+                .ctrl = .empty,
+                .msg_opcode = .continuation,
+                .msg_compressed = false,
+                .cur_opcode = .continuation,
+                .cur_fin = false,
+            };
+        }
 
         /// High-level message produced by `feed`.
         pub const Message = union(enum) {
@@ -303,6 +316,8 @@ fn FrameHandler(comptime is_server: bool) type {
             pub const DataEnd = struct {
                 /// The opcode from the first frame of the message (`.text` or `.binary`).
                 opcode: Opcode,
+                /// True if the message was compressed (RSV1 set on the first frame).
+                compressed: bool = false,
             };
         };
 
@@ -336,6 +351,7 @@ fn FrameHandler(comptime is_server: bool) type {
                         self.cur_fin = hdr.fin;
                         if (hdr.opcode == .text or hdr.opcode == .binary) {
                             self.msg_opcode = hdr.opcode;
+                            self.msg_compressed = hdr.rsv.rsv1;
                         } else if (hdr.opcode.isControl()) {
                             self.ctrl.reset();
                         }
@@ -369,7 +385,10 @@ fn FrameHandler(comptime is_server: bool) type {
                         if (self.cur_fin) {
                             return .{
                                 .consumed = input.len - data.len,
-                                .message = .{ .data_end = .{ .opcode = self.msg_opcode } },
+                                .message = .{ .data_end = .{
+                                    .opcode = self.msg_opcode,
+                                    .compressed = self.msg_compressed,
+                                } },
                             };
                         }
                         // Non-final data frame — keep going.
@@ -385,15 +404,21 @@ fn FrameHandler(comptime is_server: bool) type {
             }
         }
 
-        /// Reset to initial state.
+        /// Reset to initial state, preserving options.
         pub fn reset(self: *Self) void {
-            self.* = init;
+            self.parser.reset();
+            self.validator = .init;
+            self.ctrl.reset();
+            self.msg_opcode = .continuation;
+            self.msg_compressed = false;
+            self.cur_opcode = .continuation;
+            self.cur_fin = false;
         }
     };
 }
 
 test "Parser.init and reset" {
-    var p: ServerParser = .init;
+    var p: ServerParser = .init(.{});
     try testing.expect(p.state == .header);
     try testing.expectEqual(0, p.state.header.len);
 
@@ -405,7 +430,7 @@ test "Parser.init and reset" {
 
 test "feed: complete unmasked text frame in one call" {
     // Client parser (is_server=false) expects unmasked frames.
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     // Build a simple text frame: FIN=1, opcode=text, payload="Hello"
     var buf: [7]u8 = undefined;
     buf[0] = 0x81; // FIN + text opcode
@@ -438,7 +463,7 @@ test "feed: complete unmasked text frame in one call" {
 
 test "feed: masked frame (verify unmasking)" {
     // Server parser expects masked frames.
-    var p = ServerParser.init;
+    var p = ServerParser.init(.{});
     const mask_key = [4]u8{ 0x37, 0xFA, 0x21, 0x3D };
     const payload_text = "Hello";
 
@@ -470,7 +495,7 @@ test "feed: masked frame (verify unmasking)" {
 }
 
 test "feed: byte-at-a-time" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     // Unmasked text frame "Hi" (2 bytes header + 2 bytes payload).
     var buf = [_]u8{ 0x81, 0x02, 'H', 'i' };
 
@@ -508,7 +533,7 @@ test "feed: byte-at-a-time" {
 }
 
 test "feed: 126-byte extended length" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     const payload_len: u16 = 200;
 
     // Header: 2 base + 2 extended = 4 bytes.
@@ -529,7 +554,7 @@ test "feed: 126-byte extended length" {
 }
 
 test "feed: 127-byte (64-bit) extended length" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     const payload_len: u64 = 70000;
 
     // Header: 2 base + 8 extended = 10 bytes.
@@ -549,7 +574,7 @@ test "feed: 127-byte (64-bit) extended length" {
 }
 
 test "feed: zero-length payload" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     // Ping with no payload.
     var buf = [_]u8{ 0x89, 0x00 }; // FIN + ping, length 0
 
@@ -571,7 +596,7 @@ test "feed: zero-length payload" {
 }
 
 test "feed: multiple frames back to back" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     // Two frames: ping (no payload) + text "AB".
     var buf = [_]u8{
         0x89, 0x00, // ping, len 0
@@ -605,7 +630,7 @@ test "feed: multiple frames back to back" {
 }
 
 test "feed: control frame too long" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     // Ping with payload_len = 126 (via extended length) -- too long for control frame.
     var buf = [_]u8{ 0x89, 126, 0x00, 126 }; // ping, extended len = 126
     const result = p.feed(&buf);
@@ -613,7 +638,7 @@ test "feed: control frame too long" {
 }
 
 test "feed: control frame fragmented" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     // Ping with FIN=0 — fragmented control frame.
     var buf = [_]u8{ 0x09, 0x00 }; // no FIN (0x09 not 0x89), ping, len 0
     const result = p.feed(&buf);
@@ -621,35 +646,35 @@ test "feed: control frame fragmented" {
 }
 
 test "feed: reserved opcode" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x83, 0x00 }; // FIN + reserved opcode 3
     const result = p.feed(&buf);
     try testing.expectError(error.ReservedOpcode, result);
 }
 
 test "feed: reserved RSV bit" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0xC1, 0x00 }; // FIN + RSV1 + text
     const result = p.feed(&buf);
     try testing.expectError(error.ReservedRsvBit, result);
 }
 
 test "feed: mask required (server expects mask)" {
-    var p = ServerParser.init;
+    var p = ServerParser.init(.{});
     var buf = [_]u8{ 0x81, 0x00 }; // FIN + text, no mask bit
     const result = p.feed(&buf);
     try testing.expectError(error.MaskRequired, result);
 }
 
 test "feed: mask not allowed (client rejects mask)" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x81, 0x80, 0, 0, 0, 0 }; // FIN + text, mask bit set
     const result = p.feed(&buf);
     try testing.expectError(error.MaskNotAllowed, result);
 }
 
 test "feed: partial header across multiple feeds" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
 
     // Text frame with 200-byte payload (extended length).
     // Full header: 0x82, 126, 0x00, 0xC8 (4 bytes).
@@ -679,7 +704,7 @@ test "feed: partial header across multiple feeds" {
 test "feed: all reserved non-control opcodes rejected (0x3-0x7)" {
     const reserved = [_]u8{ 0x3, 0x4, 0x5, 0x6, 0x7 };
     for (reserved) |opcode| {
-        var p: ClientParser = .init;
+        var p: ClientParser = .init(.{});
         var buf = [_]u8{ 0x80 | opcode, 0x00 }; // FIN + reserved opcode
         try testing.expectError(error.ReservedOpcode, p.feed(&buf));
     }
@@ -688,45 +713,45 @@ test "feed: all reserved non-control opcodes rejected (0x3-0x7)" {
 test "feed: all reserved control opcodes rejected (0xB-0xF)" {
     const reserved = [_]u8{ 0xB, 0xC, 0xD, 0xE, 0xF };
     for (reserved) |opcode| {
-        var p: ClientParser = .init;
+        var p: ClientParser = .init(.{});
         var buf = [_]u8{ 0x80 | opcode, 0x00 }; // FIN + reserved opcode
         try testing.expectError(error.ReservedOpcode, p.feed(&buf));
     }
 }
 
 test "feed: RSV1 alone rejected" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x80 | 0x40 | 0x01, 0x00 }; // FIN + RSV1 + text
     try testing.expectError(error.ReservedRsvBit, p.feed(&buf));
 }
 
 test "feed: RSV2 alone rejected" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x80 | 0x20 | 0x01, 0x00 }; // FIN + RSV2 + text
     try testing.expectError(error.ReservedRsvBit, p.feed(&buf));
 }
 
 test "feed: RSV3 alone rejected" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x80 | 0x10 | 0x01, 0x00 }; // FIN + RSV3 + text
     try testing.expectError(error.ReservedRsvBit, p.feed(&buf));
 }
 
 test "feed: all RSV bits set rejected" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x80 | 0x70 | 0x01, 0x00 }; // FIN + RSV1+2+3 + text
     try testing.expectError(error.ReservedRsvBit, p.feed(&buf));
 }
 
 test "feed: payload length exactly 125 (max 7-bit)" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x82, 125 }; // FIN + binary, len=125
     const result = try p.feed(&buf);
     try testing.expectEqual(@as(u64, 125), result.event.frame_header.payload_len);
 }
 
 test "feed: payload length exactly 126 uses 16-bit extended" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf: [4]u8 = undefined;
     buf[0] = 0x82; // FIN + binary
     buf[1] = 126;
@@ -736,7 +761,7 @@ test "feed: payload length exactly 126 uses 16-bit extended" {
 }
 
 test "feed: payload length exactly 65535 (max 16-bit)" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf: [4]u8 = undefined;
     buf[0] = 0x82;
     buf[1] = 126;
@@ -746,7 +771,7 @@ test "feed: payload length exactly 65535 (max 16-bit)" {
 }
 
 test "feed: payload length exactly 65536 uses 64-bit extended" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf: [10]u8 = undefined;
     buf[0] = 0x82;
     buf[1] = 127;
@@ -757,7 +782,7 @@ test "feed: payload length exactly 65536 uses 64-bit extended" {
 
 test "feed: reject non-minimal 16-bit encoding for length 125" {
     // 125 fits in 7 bits, must not use 16-bit extended
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf: [4]u8 = undefined;
     buf[0] = 0x82;
     buf[1] = 126; // claims 16-bit extended
@@ -766,7 +791,7 @@ test "feed: reject non-minimal 16-bit encoding for length 125" {
 }
 
 test "feed: reject non-minimal 16-bit encoding for length 0" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf: [4]u8 = undefined;
     buf[0] = 0x82;
     buf[1] = 126;
@@ -775,7 +800,7 @@ test "feed: reject non-minimal 16-bit encoding for length 0" {
 }
 
 test "feed: reject non-minimal 64-bit encoding for length 125" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf: [10]u8 = undefined;
     buf[0] = 0x82;
     buf[1] = 127;
@@ -785,7 +810,7 @@ test "feed: reject non-minimal 64-bit encoding for length 125" {
 
 test "feed: reject non-minimal 64-bit encoding for length 65535" {
     // 65535 fits in 16 bits, must not use 64-bit extended
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf: [10]u8 = undefined;
     buf[0] = 0x82;
     buf[1] = 127;
@@ -794,7 +819,7 @@ test "feed: reject non-minimal 64-bit encoding for length 65535" {
 }
 
 test "feed: reject 64-bit length with MSB set" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf: [10]u8 = @splat(0);
     buf[0] = 0x82;
     buf[1] = 127;
@@ -804,38 +829,38 @@ test "feed: reject 64-bit length with MSB set" {
 }
 
 test "feed: control frame with max payload 125 accepted" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x89, 125 }; // FIN + ping, len=125
     const result = try p.feed(&buf);
     try testing.expectEqual(@as(u64, 125), result.event.frame_header.payload_len);
 }
 
 test "feed: control frame with payload 126 rejected" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x89, 126, 0x00, 126 }; // ping with 16-bit len
     try testing.expectError(error.ControlFrameTooLong, p.feed(&buf));
 }
 
 test "feed: close frame with FIN=0 rejected" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x08, 0x00 }; // close without FIN
     try testing.expectError(error.ControlFrameFragmented, p.feed(&buf));
 }
 
 test "feed: ping frame with FIN=0 rejected" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x09, 0x00 }; // ping without FIN
     try testing.expectError(error.ControlFrameFragmented, p.feed(&buf));
 }
 
 test "feed: pong frame with FIN=0 rejected" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x0A, 0x00 }; // pong without FIN
     try testing.expectError(error.ControlFrameFragmented, p.feed(&buf));
 }
 
 test "feed: continuation frame opcode parsed correctly" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x00, 0x02, 'A', 'B' }; // continuation, FIN=0, len=2
     const result = try p.feed(&buf);
     try testing.expectEqual(Opcode.continuation, result.event.frame_header.opcode);
@@ -843,7 +868,7 @@ test "feed: continuation frame opcode parsed correctly" {
 }
 
 test "feed: final continuation frame has FIN set" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
     var buf = [_]u8{ 0x80, 0x02, 'A', 'B' }; // continuation, FIN=1, len=2
     const result = try p.feed(&buf);
     try testing.expectEqual(Opcode.continuation, result.event.frame_header.opcode);
@@ -851,7 +876,7 @@ test "feed: final continuation frame has FIN set" {
 }
 
 test "feed: fragmented text message sequence" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
 
     // First fragment: text, FIN=0, "Hel"
     var f1 = [_]u8{ 0x01, 0x03, 'H', 'e', 'l' };
@@ -878,7 +903,7 @@ test "feed: fragmented text message sequence" {
 }
 
 test "feed: control frame interleaved in fragmented message" {
-    var p: ClientParser = .init;
+    var p: ClientParser = .init(.{});
 
     // Fragment 1: text, FIN=0, "A"
     var f1 = [_]u8{ 0x01, 0x01, 'A' };
@@ -907,7 +932,7 @@ test "feed: control frame interleaved in fragmented message" {
 test "round-trip: FrameHeader.Buffer → feed for all standard opcodes" {
     const opcodes = [_]Opcode{ .text, .binary, .close, .ping, .pong, .continuation };
     for (opcodes) |opcode| {
-        var p: ClientParser = .init;
+        var p: ClientParser = .init(.{});
         const header: FrameHeader.Buffer = .init(.{
             .opcode = opcode,
             .payload_len = 10,
@@ -924,7 +949,7 @@ test "round-trip: FrameHeader.Buffer → feed for all standard opcodes" {
 
 test "round-trip: FrameHeader.Buffer → feed with mask" {
     const mask_key = [4]u8{ 0x37, 0xFA, 0x21, 0x3D };
-    var p = ServerParser.init; // server expects masked
+    var p = ServerParser.init(.{}); // server expects masked
 
     const header: FrameHeader.Buffer = .init(.{
         .opcode = .text,
@@ -945,7 +970,7 @@ test "round-trip: FrameHeader.Buffer → feed with mask" {
 test "round-trip: FrameHeader.Buffer → feed at all length boundaries" {
     const lengths = [_]u64{ 0, 1, 125, 126, 127, 256, 65535, 65536, 100000 };
     for (lengths) |payload_len| {
-        var p: ClientParser = .init;
+        var p: ClientParser = .init(.{});
         const header: FrameHeader.Buffer = .init(.{
             .opcode = .binary,
             .payload_len = payload_len,
@@ -1076,7 +1101,7 @@ fn buildMaskedFrame(out: []u8, opcode: Opcode, fin: bool, payload: []const u8) u
 }
 
 test "FrameHandler: single text message" {
-    var h: ServerFrameHandler = .init;
+    var h: ServerFrameHandler = .init(.{});
     var buf: [64]u8 = undefined;
     const len = buildMaskedFrame(&buf, .text, true, "Hello");
 
@@ -1093,7 +1118,7 @@ test "FrameHandler: single text message" {
 }
 
 test "FrameHandler: binary message" {
-    var h: ServerFrameHandler = .init;
+    var h: ServerFrameHandler = .init(.{});
     var buf: [64]u8 = undefined;
     const payload = &[_]u8{ 0x01, 0x02, 0x03 };
     const len = buildMaskedFrame(&buf, .binary, true, payload);
@@ -1111,7 +1136,7 @@ test "FrameHandler: binary message" {
 }
 
 test "FrameHandler: ping produces .ping" {
-    var h: ServerFrameHandler = .init;
+    var h: ServerFrameHandler = .init(.{});
     var buf: [64]u8 = undefined;
     const len = buildMaskedFrame(&buf, .ping, true, "ping!");
 
@@ -1120,7 +1145,7 @@ test "FrameHandler: ping produces .ping" {
 }
 
 test "FrameHandler: pong produces .pong" {
-    var h: ServerFrameHandler = .init;
+    var h: ServerFrameHandler = .init(.{});
     var buf: [64]u8 = undefined;
     const len = buildMaskedFrame(&buf, .pong, true, "pong!");
 
@@ -1129,7 +1154,7 @@ test "FrameHandler: pong produces .pong" {
 }
 
 test "FrameHandler: close produces .close with raw payload" {
-    var h: ServerFrameHandler = .init;
+    var h: ServerFrameHandler = .init(.{});
     var buf: [64]u8 = undefined;
     const close_body = CloseCode.normal.toBytes() ++ "bye".*;
     const len = buildMaskedFrame(&buf, .close, true, &close_body);
@@ -1144,7 +1169,7 @@ test "FrameHandler: close produces .close with raw payload" {
 }
 
 test "FrameHandler: empty close frame" {
-    var h: ServerFrameHandler = .init;
+    var h: ServerFrameHandler = .init(.{});
     var buf: [64]u8 = undefined;
     const len = buildMaskedFrame(&buf, .close, true, "");
 
@@ -1153,7 +1178,7 @@ test "FrameHandler: empty close frame" {
 }
 
 test "FrameHandler: fragmented message preserves original opcode" {
-    var h: ServerFrameHandler = .init;
+    var h: ServerFrameHandler = .init(.{});
     var buf: [128]u8 = undefined;
 
     // First fragment: text, FIN=false
@@ -1182,7 +1207,7 @@ test "FrameHandler: fragmented message preserves original opcode" {
 }
 
 test "FrameHandler: control frame interleaved mid-fragment" {
-    var h: ServerFrameHandler = .init;
+    var h: ServerFrameHandler = .init(.{});
     var buf: [128]u8 = undefined;
 
     // First fragment: text, FIN=false
@@ -1216,7 +1241,7 @@ test "FrameHandler: control frame interleaved mid-fragment" {
 }
 
 test "FrameHandler: validation error on unexpected continuation" {
-    var h: ServerFrameHandler = .init;
+    var h: ServerFrameHandler = .init(.{});
     var buf: [64]u8 = undefined;
     const len = buildMaskedFrame(&buf, .continuation, true, "bad");
 
@@ -1225,7 +1250,7 @@ test "FrameHandler: validation error on unexpected continuation" {
 }
 
 test "FrameHandler: need_more on partial input" {
-    var h: ServerFrameHandler = .init;
+    var h: ServerFrameHandler = .init(.{});
     // Just one byte — not enough for a header.
     var buf = [_]u8{0x81};
     const result = try h.feed(&buf);

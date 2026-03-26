@@ -173,7 +173,7 @@ fn echoLoop(
     reader: *Io.Reader,
     writer: *Io.Writer,
 ) !void {
-    var handler: ws.ServerFrameHandler = .init;
+    var handler: ws.ServerFrameHandler = .init(.{});
     var msg: std.ArrayList(u8) = .empty;
     defer msg.deinit(gpa);
 
@@ -223,7 +223,7 @@ fn processFrames(
 
             // Complete message — echo it back to the client.
             .data_end => |end| {
-                try ws.writeFrame(writer, end.opcode, msg.items);
+                try ws.writeFrame(writer, msg.items, .{ .opcode = end.opcode });
                 msg.clearRetainingCapacity();
             },
 
@@ -235,7 +235,7 @@ fn processFrames(
 
             // Close — echo the close frame and shut down.
             .close => |payload| {
-                try ws.writeFrame(writer, .close, payload);
+                try ws.writeFrame(writer, payload, .{ .opcode = .close });
                 return .close;
             },
 

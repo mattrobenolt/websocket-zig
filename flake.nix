@@ -32,7 +32,11 @@
             zigdoc
             just
             python3
+            zlib
           ];
+          shellHook = ''
+            unset NIX_CFLAGS_COMPILE
+          '';
         };
       }
     );

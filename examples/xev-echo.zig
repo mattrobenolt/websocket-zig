@@ -71,7 +71,7 @@ const Connection = struct {
     /// The WebSocket frame handler — wraps the parser, fragmentation
     /// validator, and control frame accumulator into a single state
     /// machine that emits high-level messages (data, ping, close, etc).
-    handler: ws.ServerFrameHandler = .init,
+    handler: ws.ServerFrameHandler = .init(.{}),
 
     /// Accumulated message payload across fragments. For an echo server,
     /// we need the complete message before we can echo it back.
@@ -311,7 +311,7 @@ const Connection = struct {
         // Build the HTTP 101 Switching Protocols response. The library
         // computes the Sec-WebSocket-Accept hash and formats the
         // complete response.
-        const resp: ws.UpgradeResponse = .init(key);
+        const resp: ws.UpgradeResponse = .init(.{ .key = key });
         try self.write_buf.appendSlice(self.allocator, resp.constSlice());
 
         // Any bytes after the HTTP headers are the start of a WebSocket

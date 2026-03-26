@@ -6,7 +6,7 @@
 //! `finish` to send the final frame with `fin = true`.
 //!
 //! ```
-//! var msg: ws.MessageWriter = .init(writer, .text);
+//! var msg: ws.MessageWriter = .init(writer, .{ .opcode = .text });
 //! try msg.writeChunk(part1);
 //! try msg.writeChunk(part2);
 //! try msg.finish(part3);
@@ -22,17 +22,22 @@ const Io = std.Io;
 const frame = @import("frame.zig");
 const FrameHeader = frame.FrameHeader;
 const Opcode = frame.Opcode;
+const RsvBits = frame.RsvBits;
+const root = @import("root.zig");
+const WriteFrameOptions = root.WriteFrameOptions;
 
 writer: *Io.Writer,
 opcode: Opcode,
+rsv: RsvBits,
 
 const MessageWriter = @This();
 
-pub fn init(writer: *Io.Writer, opcode: Opcode) MessageWriter {
-    assert(opcode == .text or opcode == .binary);
+pub fn init(writer: *Io.Writer, options: WriteFrameOptions) MessageWriter {
+    assert(options.opcode == .text or options.opcode == .binary);
     return .{
         .writer = writer,
-        .opcode = opcode,
+        .opcode = options.opcode,
+        .rsv = if (options.compressed) .{ .rsv1 = true } else .{},
     };
 }
 
@@ -41,12 +46,14 @@ pub fn init(writer: *Io.Writer, opcode: Opcode) MessageWriter {
 pub fn writeChunk(self: *MessageWriter, payload: []const u8) Io.Writer.Error!void {
     const header: FrameHeader.Buffer = .init(.{
         .fin = false,
+        .rsv = self.rsv,
         .opcode = self.opcode,
         .payload_len = payload.len,
     });
     try header.write(self.writer);
     if (payload.len > 0) try self.writer.writeAll(payload);
     self.opcode = .continuation;
+    self.rsv = .empty; // RSV1 only on first frame per RFC 7692 §6.1
 }
 
 /// Send the final frame with `fin = true`, completing the message.
@@ -56,6 +63,7 @@ pub fn finish(self: *MessageWriter, payload: ?[]const u8) Io.Writer.Error!void {
     const data = payload orelse &.{};
     const header: FrameHeader.Buffer = .init(.{
         .fin = true,
+        .rsv = self.rsv,
         .opcode = self.opcode,
         .payload_len = data.len,
     });
@@ -67,7 +75,7 @@ test "single chunk finish" {
     var buf: [64]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
 
-    var msg: MessageWriter = .init(&writer, .text);
+    var msg: MessageWriter = .init(&writer, .{ .opcode = .text });
     try msg.finish("hello");
 
     try testing.expectEqual(@as(u8, 0x81), buf[0]); // fin + text
@@ -79,7 +87,7 @@ test "two chunks and finish" {
     var buf: [64]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
 
-    var msg: MessageWriter = .init(&writer, .binary);
+    var msg: MessageWriter = .init(&writer, .{ .opcode = .binary });
     try msg.writeChunk("ab");
     try msg.writeChunk("cd");
     try msg.finish("ef");
@@ -104,7 +112,7 @@ test "finish with null payload" {
     var buf: [64]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
 
-    var msg: MessageWriter = .init(&writer, .text);
+    var msg: MessageWriter = .init(&writer, .{ .opcode = .text });
     try msg.writeChunk("data");
     try msg.finish(null);
 
@@ -115,4 +123,36 @@ test "finish with null payload" {
     // Frame 2: fin=true, opcode=continuation, len=0
     try testing.expectEqual(@as(u8, 0x80), buf[6]); // fin + continuation
     try testing.expectEqual(@as(u8, 0), buf[7]);
+}
+
+test "compressed: RSV1 on first frame only" {
+    var buf: [64]u8 = undefined;
+    var writer: Io.Writer = .fixed(&buf);
+
+    var msg: MessageWriter = .init(&writer, .{ .opcode = .text, .compressed = true });
+    try msg.writeChunk("ab");
+    try msg.writeChunk("cd");
+    try msg.finish("ef");
+
+    // Frame 1: fin=false, RSV1=1, opcode=text -> 0x41
+    try testing.expectEqual(@as(u8, 0x41), buf[0]);
+    try testing.expectEqual(@as(u8, 2), buf[1]);
+
+    // Frame 2: fin=false, RSV1=0, opcode=continuation -> 0x00
+    try testing.expectEqual(@as(u8, 0x00), buf[4]);
+
+    // Frame 3: fin=true, RSV1=0, opcode=continuation -> 0x80
+    try testing.expectEqual(@as(u8, 0x80), buf[8]);
+}
+
+test "compressed: single frame finish sets RSV1" {
+    var buf: [64]u8 = undefined;
+    var writer: Io.Writer = .fixed(&buf);
+
+    var msg: MessageWriter = .init(&writer, .{ .opcode = .binary, .compressed = true });
+    try msg.finish("data");
+
+    // fin=true, RSV1=1, opcode=binary -> 0xC2
+    try testing.expectEqual(@as(u8, 0xC2), buf[0]);
+    try testing.expectEqual(@as(u8, 4), buf[1]);
 }

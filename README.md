@@ -25,7 +25,7 @@ exe.root_module.addImport("websocket", websocket.module("websocket"));
 ```zig
 const ws = @import("websocket");
 
-var handler: ws.ServerFrameHandler = .init;
+var handler: ws.ServerFrameHandler = .init(.{});
 
 while (true) {
     const result = try handler.feed(buf);
@@ -41,7 +41,7 @@ while (true) {
         .ping => |payload| try ws.writePong(writer, payload),
         .pong => {},
         .close => |payload| {
-            try ws.writeFrame(writer, .close, payload);
+            try ws.writeFrame(writer, payload, .{ .opcode = .close });
             return;
         },
         .need_more => break,
@@ -54,7 +54,7 @@ while (true) {
 `ServerParser` / `ClientParser` gives raw frame-level events for full control. The frame handler above is built on top of this:
 
 ```zig
-var parser: ws.ServerParser = .init;
+var parser: ws.ServerParser = .init(.{});
 
 while (true) {
     const result = try parser.feed(buf);
@@ -77,13 +77,13 @@ while (true) {
 
 ```zig
 // Complete frame in one call.
-try ws.writeFrame(writer, .text, payload);
+try ws.writeFrame(writer, payload, .{ .opcode = .text });
 
 // Close with a status code.
 try ws.writeClose(writer, .normal);
 
 // Stream a large message across multiple frames.
-var msg: ws.MessageWriter = .init(writer, .text);
+var msg: ws.MessageWriter = .init(writer, .{ .opcode = .text });
 try msg.writeChunk(part1);
 try msg.writeChunk(part2);
 try msg.finish(part3);
@@ -110,7 +110,7 @@ Computes the `Sec-WebSocket-Accept` value and can generate the full HTTP 101 res
 
 ```zig
 // Build the full HTTP 101 response.
-const resp: ws.UpgradeResponse = .init(client_key);
+const resp: ws.UpgradeResponse = .init(.{ .key = client_key });
 try resp.write(writer);
 
 // Or compute just the accept key.
@@ -136,7 +136,7 @@ just examples
 
 - **No allocations.** The parser operates on caller-provided buffers and returns slices back into them. Internal state is a 14-byte header buffer in the parser, plus 125 bytes in the frame handler for control frame payloads.
 - **No UTF-8 validation.** Text frame payloads are opaque bytes. Validation is the caller's choice.
-- **No compression.** `permessage-deflate` (RFC 7692) is not implemented.
+- **Compression-aware, not compression-providing.** The parser and serializer support the `permessage-deflate` extension (RFC 7692) — RSV1 handling, negotiation helpers, and a `compressed` flag on frames — but actual deflate/inflate is the caller's responsibility.
 - **No HTTP parsing.** The handshake computes `Sec-WebSocket-Accept`. Everything else about your HTTP stack is up to you.
 
 ## Conformance
