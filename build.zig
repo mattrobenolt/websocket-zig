@@ -20,6 +20,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("test/echo_server.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "websocket", .module = mod },
             },
