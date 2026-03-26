@@ -32,6 +32,9 @@
             zigdoc
             just
             python3
+            pkg-config
+          ];
+          buildInputs = with pkgs; [
             zlib
           ];
           shellHook = ''
