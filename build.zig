@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    echo_server.root_module.linkSystemLibrary("z", .{});
+    echo_server.root_module.linkSystemLibrary("zlib", .{ .use_pkg_config = .force });
 
     b.installArtifact(echo_server);
 
