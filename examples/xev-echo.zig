@@ -26,7 +26,7 @@ const mem = std.mem;
 const posix = std.posix;
 const print = std.debug.print;
 
-const ws = @import("websocket");
+const ws = @import("websocket").server;
 const xev = @import("xev");
 
 /// Pool for recycling Connection structs. Avoids hitting the general-purpose
@@ -71,7 +71,7 @@ const Connection = struct {
     /// The WebSocket frame handler — wraps the parser, fragmentation
     /// validator, and control frame accumulator into a single state
     /// machine that emits high-level messages (data, ping, close, etc).
-    handler: ws.ServerFrameHandler = .init(.{}),
+    handler: ws.FrameHandler = .init(.{}),
 
     /// Accumulated message payload across fragments. For an echo server,
     /// we need the complete message before we can echo it back.

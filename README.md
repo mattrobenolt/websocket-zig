@@ -20,12 +20,12 @@ exe.root_module.addImport("websocket", websocket.module("websocket"));
 
 ### Frame Handler (recommended)
 
-`ServerFrameHandler` / `ClientFrameHandler` handles fragmentation, control frame accumulation, and message boundaries. Feed it bytes, switch on events:
+Import the role namespace you need. The examples below use `server`; switch to `.client` when you are connecting to a server instead of accepting a client.
 
 ```zig
-const ws = @import("websocket");
+const ws = @import("websocket").server;
 
-var handler: ws.ServerFrameHandler = .init(.{});
+var handler: ws.FrameHandler = .init(.{});
 
 while (true) {
     const result = try handler.feed(buf);
@@ -51,10 +51,12 @@ while (true) {
 
 ### Low-Level Parser
 
-`ServerParser` / `ClientParser` gives raw frame-level events for full control. The frame handler above is built on top of this:
+`server.Parser` / `client.Parser` gives raw frame-level events for full control. The frame handler above is built on top of this:
 
 ```zig
-var parser: ws.ServerParser = .init(.{});
+const ws = @import("websocket").server;
+
+var parser: ws.Parser = .init(.{});
 
 while (true) {
     const result = try parser.feed(buf);
@@ -76,6 +78,8 @@ while (true) {
 ## Serialization
 
 ```zig
+const ws = @import("websocket").server;
+
 // Complete frame in one call.
 try ws.writeFrame(writer, payload, .{ .opcode = .text });
 
@@ -98,6 +102,8 @@ const header: ws.FrameHeader.Buffer = .init(.{
 ## Masking
 
 ```zig
+const ws = @import("websocket").client;
+
 var mask: ws.Mask = .init(mask_key);
 mask.apply(chunk1);
 mask.apply(chunk2);
@@ -109,6 +115,8 @@ mask.apply(chunk2);
 Computes the `Sec-WebSocket-Accept` value and can generate the full HTTP 101 response. HTTP parsing is your responsibility.
 
 ```zig
+const ws = @import("websocket").server;
+
 // Build the full HTTP 101 response.
 const resp: ws.UpgradeResponse = .init(.{ .key = client_key });
 try resp.write(writer);

@@ -4,12 +4,14 @@ IO-agnostic WebSocket frame parser and serializer in Zig. Zero allocations, no I
 
 ## Architecture
 
-- `src/root.zig` — library entry point. Re-exports the public API and contains the `writeFrame`/`writeClose`/`writePing`/`writePong` helpers.
-- `src/frame.zig` — core types (`Opcode`, `RsvBits`, `FrameHeader`, `Mask`, `Event`, `ParseError`), `BoundedBuffer`, and `readInt`/`writeInt` helpers.
+- `src/root.zig` — library entry point. Exports the `client` and `server` namespaces.
+- `src/client.zig` — client namespace. Re-exports client-side types (`Parser`, `FrameHandler`, `MessageWriter`) and provides masked `writeFrame`/`writeClose`/`writePing`/`writePong`.
+- `src/server.zig` — server namespace. Re-exports server-side types (`Parser`, `FrameHandler`, `MessageWriter`, `UpgradeResponse`) and provides unmasked `writeFrame`/`writeClose`/`writePing`/`writePong`.
+- `src/frame.zig` — core types (`Opcode`, `RsvBits`, `FrameHeader`, `Mask`, `Event`, `ParseError`, `WriteFrameOptions`), `BoundedBuffer`, `generateMaskKey`, and `readInt`/`writeInt` helpers.
 - `src/parse.zig` — streaming `Parser` (server/client), `MessageValidator`, and `FrameHandler` (higher-level message-oriented API).
 - `src/close.zig` — `CloseCode`, `ClosePayload`, `parseClosePayload`.
 - `src/handshake.zig` — `computeAcceptKey`, `UpgradeRequest`, `validateUpgradeRequest`, `UpgradeResponse`.
-- `src/MessageWriter.zig` — fragmented message writer (file-as-struct).
+- `src/message_writer.zig` — `MessageWriter(comptime masked: bool)` generic, instantiated as `ServerMessageWriter` (unmasked) and `ClientMessageWriter` (masked).
 - `test/echo_server.zig` — test scaffolding only. A minimal echo server for running the Autobahn conformance suite. Not part of the library.
 - `examples/blocking-echo.zig` — single-threaded blocking echo server using `std.net` and `std.Io`. Simplest possible integration.
 - `examples/http-upgrade.zig` — thread-per-connection HTTP server using `std.http.Server` with WebSocket upgrade on `/ws` and a static HTML page on `/`. Uses `@embedFile` for the HTML.
@@ -18,7 +20,7 @@ IO-agnostic WebSocket frame parser and serializer in Zig. Zero allocations, no I
 ## Design Decisions
 
 - **No UTF-8 validation.** Text frame payloads are treated as opaque bytes. UTF-8 validation is the caller's responsibility. The echo server does its own validation to satisfy Autobahn.
-- **No compression.** We do not implement `permessage-deflate` (RFC 7692). The Autobahn compression tests (categories 12–13) report `UNIMPLEMENTED`, which is the correct status.
+- **Permessage-deflate.** The library supports the `permessage-deflate` extension (RFC 7692) via the `Extension` type and the `compressed` flag on `WriteFrameOptions`. The echo server negotiates compression for the Autobahn conformance suite.
 - **No handshake HTTP parsing.** The library provides `computeAcceptKey` for the `Sec-WebSocket-Accept` header, but HTTP upgrade parsing is the caller's responsibility.
 
 ## Development

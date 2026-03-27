@@ -19,7 +19,7 @@ const Address = net.Address;
 const mem = std.mem;
 const print = std.debug.print;
 
-const ws = @import("websocket");
+const ws = @import("websocket").server;
 const DeflateConfig = ws.Extension.DeflateConfig;
 
 const c = @cImport(@cInclude("zlib.h"));
@@ -246,7 +246,7 @@ const ZlibState = struct {
 };
 
 const EchoHandler = struct {
-    handler: ws.ServerFrameHandler,
+    handler: ws.FrameHandler,
     msg: std.ArrayList(u8),
     zlib: ?*ZlibState,
 

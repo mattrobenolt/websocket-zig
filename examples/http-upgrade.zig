@@ -23,7 +23,7 @@ const Io = std.Io;
 const mem = std.mem;
 const print = std.debug.print;
 
-const ws = @import("websocket");
+const ws = @import("websocket").server;
 
 pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -173,7 +173,7 @@ fn echoLoop(
     reader: *Io.Reader,
     writer: *Io.Writer,
 ) !void {
-    var handler: ws.ServerFrameHandler = .init(.{});
+    var handler: ws.FrameHandler = .init(.{});
     var msg: std.ArrayList(u8) = .empty;
     defer msg.deinit(gpa);
 
@@ -198,7 +198,7 @@ const Status = enum { continue_reading, close };
 /// Feed a buffer through the frame handler and act on each message.
 fn processFrames(
     gpa: Allocator,
-    handler: *ws.ServerFrameHandler,
+    handler: *ws.FrameHandler,
     msg: *std.ArrayList(u8),
     input: []u8,
     writer: *Io.Writer,

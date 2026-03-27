@@ -22,7 +22,9 @@ const max_header_len = frame.max_header_len;
 const readInt = frame.readInt;
 const writeInt = frame.writeInt;
 
+/// Parser options shared by the client and server role APIs.
 pub const Options = struct {
+    /// Negotiated extension that is allowed to claim RSV bits during parsing.
     extension: ?Extension = null,
 };
 
@@ -257,7 +259,8 @@ pub const ClientFrameHandler = FrameHandler(false);
 /// input buffer. Control payloads are accumulated in an internal 125-byte buffer.
 ///
 /// ```
-/// var handler: websocket.ServerFrameHandler = .init(.{});
+/// const ws = @import("websocket").server;
+/// var handler: ws.FrameHandler = .init(.{});
 /// while (true) {
 ///     const result = try handler.feed(buf);
 ///     buf = buf[result.consumed..];

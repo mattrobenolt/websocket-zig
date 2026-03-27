@@ -35,7 +35,7 @@ pub const Extension = union(enum) {
 
     pub fn claimedRsv(self: Extension) RsvBits {
         return switch (self) {
-            .permessage_deflate => .{ .rsv1 = true },
+            .permessage_deflate => .permessage_deflate,
         };
     }
 

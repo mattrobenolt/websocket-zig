@@ -6,6 +6,15 @@ const Io = std.Io;
 
 /// The 4-byte masking key used to mask/unmask WebSocket frame payloads (RFC 6455 Section 5.3).
 pub const MaskKey = [4]u8;
+
+/// Generate a cryptographically random mask key.
+/// RFC 6455 Section 5.3 requires unpredictable keys to prevent proxy cache poisoning.
+pub fn generateMaskKey() MaskKey {
+    var key: MaskKey = undefined;
+    std.crypto.random.bytes(&key);
+    return key;
+}
+
 /// 28-byte buffer for the base64-encoded `Sec-WebSocket-Accept` header value.
 pub const AcceptKey = [28]u8;
 
@@ -129,6 +138,9 @@ pub const RsvBits = packed struct(u3) {
     /// All bits unset (the default for frames without extensions).
     pub const empty: RsvBits = .{};
 
+    /// RSV1 set, as required by permessage-deflate (RFC 7692 §6.1).
+    pub const permessage_deflate: RsvBits = .{ .rsv1 = true };
+
     /// Returns true if any RSV bit is set.
     pub fn areSet(self: RsvBits) bool {
         return @as(u3, @bitCast(self)) != 0;
@@ -214,7 +226,7 @@ pub const FrameHeader = struct {
     }
 };
 
-/// Events emitted by `ServerParser.feed` / `ClientParser.feed`.
+/// Events emitted by the role-specific `Parser.feed` implementations.
 /// The caller must loop on `feed`, advancing the input by `consumed` bytes,
 /// until `need_more` is returned or the input is exhausted.
 pub const Event = union(enum) {
@@ -228,7 +240,7 @@ pub const Event = union(enum) {
     need_more,
 };
 
-/// Errors returned by `ServerParser.feed` / `ClientParser.feed` for
+/// Errors returned by the role-specific `Parser.feed` implementations for
 /// protocol violations detected during frame parsing.
 pub const ParseError = error{
     ReservedRsvBit,
@@ -282,10 +294,21 @@ pub const Mask = struct {
     }
 };
 
+/// Options for `writeFrame` and `MessageWriter.init`.
+pub const WriteFrameOptions = struct {
+    /// Frame opcode. Only non-reserved opcodes are valid.
+    opcode: Opcode,
+    /// Set when the payload has been compressed with permessage-deflate.
+    /// Controls the RSV1 bit on the first frame.
+    compressed: bool = false,
+};
+
+/// Read a fixed-width integer from a big-endian byte array.
 pub inline fn readInt(comptime T: type, buffer: *const [@divExact(@typeInfo(T).int.bits, 8)]u8) T {
     return mem.readInt(T, buffer, .big);
 }
 
+/// Write a fixed-width integer into a big-endian byte array.
 pub inline fn writeInt(
     comptime T: type,
     buffer: *[@divExact(@typeInfo(T).int.bits, 8)]u8,

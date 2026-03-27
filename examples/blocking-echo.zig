@@ -16,7 +16,7 @@ const Io = std.Io;
 const mem = std.mem;
 const print = std.debug.print;
 
-const ws = @import("websocket");
+const ws = @import("websocket").server;
 
 pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -94,13 +94,13 @@ fn handleConnection(gpa: Allocator, stream: std.net.Stream) !void {
 }
 
 /// Manages WebSocket protocol state for one connection.
-/// Uses `ServerFrameHandler` for parsing, fragmentation validation,
+/// Uses `ws.FrameHandler` for parsing, fragmentation validation,
 /// and control frame accumulation. Only needs to handle the
 /// high-level messages: data, ping, pong, and close.
 const EchoHandler = struct {
     /// The frame handler — wraps the parser, validator, and control
     /// buffer into a single state machine that emits high-level messages.
-    handler: ws.ServerFrameHandler,
+    handler: ws.FrameHandler,
 
     /// Accumulated message payload across fragments. Grows
     /// dynamically — no fixed size limit.
