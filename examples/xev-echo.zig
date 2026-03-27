@@ -467,12 +467,12 @@ pub fn main() !void {
     defer loop.deinit();
 
     const port = parsePort();
-    const address: std.net.Address = try .resolveIp("0.0.0.0", port);
+    const address: std.net.Address = try .resolveIp("127.0.0.1", port);
     var server: xev.TCP = try .init(address);
     try server.bind(address);
     try server.listen(128);
 
-    print("listening on 0.0.0.0:{d}\n", .{port});
+    print("listening on 127.0.0.1:{d}\n", .{port});
 
     // Start accepting connections. The accept callback re-arms itself
     // so we keep accepting after each connection.

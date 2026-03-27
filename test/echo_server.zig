@@ -30,12 +30,12 @@ pub fn main() !void {
     const allocator = debug_allocator.allocator();
 
     const port = parsePort();
-    const address: Address = try .resolveIp("0.0.0.0", port);
+    const address: Address = try .resolveIp("127.0.0.1", port);
 
-    var server = try address.listen(.{ .reuse_address = true });
+    var server = try address.listen(.{});
     defer server.deinit();
 
-    print("echo server listening on 0.0.0.0:{d}\n", .{port});
+    print("echo server listening on 127.0.0.1:{d}\n", .{port});
 
     while (true) {
         const conn = server.accept() catch |err| {
@@ -71,13 +71,13 @@ fn handleConnection(allocator: Allocator, stream: Stream) !void {
             const headers = hdr_data[0..header_end];
             const key = extractWebSocketKey(headers) orelse return;
             const hs = negotiateHandshake(headers);
-            reader.toss(header_end);
 
             const ext: ?ws.Extension = if (hs.deflate) |cfg|
                 .{ .permessage_deflate = cfg }
             else
                 null;
             const resp: ws.UpgradeResponse = .init(.{ .key = key, .extension = ext });
+            reader.toss(header_end);
             try resp.write(writer);
             try writer.flush();
 

@@ -4,7 +4,7 @@ _default:
 
 [doc("Run unit tests")]
 test *args:
-    zig build test --summary all {{args}}
+    zig build test --summary all {{ args }}
 
 [doc("Format all Zig source files")]
 fmt:
@@ -25,20 +25,34 @@ check: fmt-check lint
 examples:
     zig build examples
 
-[doc("Run the Autobahn conformance suite")]
-conformance:
-    rm -rf test/autobahn/reports
+[doc("Install the native Autobahn TestSuite into the local PyPy environment")]
+autobahn-setup:
+    ./scripts/setup-autobahn-native.nu
+
+[doc("Regenerate the Autobahn hashed dependency lock")]
+autobahn-lock:
+    ./scripts/generate-autobahn-lock.nu
+
+[doc("Run native wstest from the local PyPy environment")]
+autobahn-wstest *args: autobahn-setup
+    ./scripts/wstest-native.nu {{ args }}
+
+[doc("Run the fast Autobahn conformance suite for local iteration")]
+conformance: autobahn-setup
     zig build conformance
 
-[doc("Run Autobahn against the xev echo server")]
-conformance-xev:
-    rm -rf test/autobahn/reports
+[doc("Run the full Autobahn conformance suite")]
+conformance-full: autobahn-setup
+    zig build conformance-full
+
+[doc("Run the fast Autobahn suite against the xev echo server")]
+conformance-xev: autobahn-setup
     zig build conformance-xev
 
-[doc("Run all checks: format, lint, test, conformance")]
-ci: check test conformance
+[doc("Run all checks: format, lint, test, full conformance")]
+ci: check test conformance-full
 
 [doc("Serve the Autobahn report in a browser")]
 report port="8080":
-    @echo "http://localhost:{{port}}/index.html"
-    python3 -m http.server -d test/autobahn/reports -b 127.0.0.1 {{port}}
+    @echo "http://localhost:{{ port }}/index.html"
+    python3 -m http.server -d test/autobahn/reports -b 127.0.0.1 {{ port }}

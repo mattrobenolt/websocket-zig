@@ -31,11 +31,11 @@ pub fn main() !void {
     const allocator = debug_allocator.allocator();
 
     const port = parsePort();
-    const address: std.net.Address = try .resolveIp("0.0.0.0", port);
-    var listener = try address.listen(.{ .reuse_address = true });
+    const address: std.net.Address = try .resolveIp("127.0.0.1", port);
+    var listener = try address.listen(.{});
     defer listener.deinit();
 
-    print("listening on http://0.0.0.0:{d}\n", .{port});
+    print("listening on http://127.0.0.1:{d}\n", .{port});
 
     // Accept loop — spawn a thread per connection.
     while (true) {

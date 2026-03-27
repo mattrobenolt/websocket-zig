@@ -141,12 +141,16 @@ just examples
 
 ## Conformance
 
-Passes the full [Autobahn test suite](https://github.com/crossbario/autobahn-testsuite). Run it yourself (requires Docker):
+Passes the full [Autobahn test suite](https://github.com/crossbario/autobahn-testsuite). The devshell includes the native PyPy/OpenSSL runtime needed to run `wstest` directly, without Docker:
 
 ```
-just conformance
+just autobahn-setup
+just conformance       # fast local subset, excludes 9.*, 12.*, 13.*
+just conformance-full  # full suite
 just report        # serve the HTML report on localhost:8080
 ```
+
+`just ci` runs the full Autobahn suite.
 
 ## License
 

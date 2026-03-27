@@ -68,18 +68,36 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(http_upgrade);
     examples_step.dependOn(&http_upgrade.step);
 
-    const run_autobahn = b.path("scripts/run-autobahn.sh").getPath(b);
+    const run_autobahn = b.path("scripts/run-autobahn.nu").getPath(b);
 
     const conformance_script = b.addSystemCommand(&.{
+        "nu",
         run_autobahn,
         b.getInstallPath(.bin, "echo-server"),
         "9002",
         "echo-server",
+        "fast",
     });
     conformance_script.step.dependOn(&b.addInstallArtifact(echo_server, .{}).step);
 
-    const conformance_step = b.step("conformance", "Run the Autobahn conformance test suite");
+    const conformance_step = b.step("conformance", "Run the fast Autobahn conformance suite");
     conformance_step.dependOn(&conformance_script.step);
+
+    const conformance_full_script = b.addSystemCommand(&.{
+        "nu",
+        run_autobahn,
+        b.getInstallPath(.bin, "echo-server"),
+        "9002",
+        "echo-server",
+        "full",
+    });
+    conformance_full_script.step.dependOn(&b.addInstallArtifact(echo_server, .{}).step);
+
+    const conformance_full_step = b.step(
+        "conformance-full",
+        "Run the full Autobahn conformance test suite",
+    );
+    conformance_full_step.dependOn(&conformance_full_script.step);
 
     if (b.lazyDependency("libxev", .{})) |xev_dep| {
         const xev_echo = b.addExecutable(.{
@@ -98,10 +116,12 @@ pub fn build(b: *std.Build) void {
         examples_step.dependOn(&xev_install.step);
 
         const xev_conformance = b.addSystemCommand(&.{
+            "nu",
             run_autobahn,
             b.getInstallPath(.bin, "xev-echo"),
             "9003",
             "xev-echo",
+            "fast",
         });
         xev_conformance.step.dependOn(&xev_install.step);
 

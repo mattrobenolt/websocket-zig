@@ -40,9 +40,11 @@ just fmt-check        # Check formatting without modifying files
 just lint             # Run ziglint
 just check            # Format check and lint
 just examples         # Build all examples
-just conformance      # Run the Autobahn conformance suite (requires Docker)
-just conformance-xev  # Run Autobahn against xev echo server
-just ci               # All checks: format, lint, test, conformance
+just autobahn-setup   # Install the native Autobahn TestSuite runtime
+just conformance      # Run the fast native Autobahn suite for local iteration
+just conformance-full # Run the full native Autobahn suite
+just conformance-xev  # Run the fast Autobahn suite against xev echo server
+just ci               # All checks: format, lint, test, full conformance
 just report           # Serve the Autobahn HTML report on localhost:8080
 ```
 ## RFC Reference
