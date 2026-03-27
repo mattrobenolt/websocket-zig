@@ -13,7 +13,9 @@ IO-agnostic WebSocket frame parser and serializer in Zig. Zero allocations, no I
 - `src/handshake.zig` — `computeAcceptKey`, `UpgradeRequest`, `validateUpgradeRequest`, `UpgradeResponse`.
 - `src/message_writer.zig` — `MessageWriter(comptime masked: bool)` generic, instantiated as `ServerMessageWriter` (unmasked) and `ClientMessageWriter` (masked).
 - `test/echo_server.zig` — test scaffolding only. A minimal echo server for running the Autobahn conformance suite. Not part of the library.
+- `test/echo_client.zig` — test scaffolding only. A minimal echo client for running the Autobahn client conformance suite against a fuzzingserver. Supports permessage-deflate. Not part of the library.
 - `examples/blocking-echo.zig` — single-threaded blocking echo server using `std.net` and `std.Io`. Simplest possible integration.
+- `examples/blocking-client.zig` — single-threaded blocking WebSocket client using `std.net` and `std.Io`. Pairs with `blocking-echo` for a complete client/server demo.
 - `examples/http-upgrade.zig` — thread-per-connection HTTP server using `std.http.Server` with WebSocket upgrade on `/ws` and a static HTML page on `/`. Uses `@embedFile` for the HTML.
 - `examples/xev-echo.zig` — completion-based echo server using libxev's event loop with connection pooling. Most production-like example.
 
@@ -43,9 +45,11 @@ just lint             # Run ziglint
 just check            # Format check and lint
 just examples         # Build all examples
 just autobahn-setup   # Install the native Autobahn TestSuite runtime
-just conformance      # Run the fast native Autobahn suite for local iteration
-just conformance-full # Run the full native Autobahn suite
-just conformance-xev  # Run the fast Autobahn suite against xev echo server
+just conformance             # Run the fast native Autobahn suite for local iteration
+just conformance-full        # Run the full native Autobahn suite
+just conformance-client      # Run the fast Autobahn client conformance suite
+just conformance-client-full # Run the full Autobahn client conformance suite
+just conformance-xev         # Run the fast Autobahn suite against xev echo server
 just ci               # All checks: format, lint, test, full conformance
 just report           # Serve the Autobahn HTML report on localhost:8080
 ```

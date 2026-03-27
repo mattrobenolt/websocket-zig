@@ -45,6 +45,14 @@ conformance: autobahn-setup
 conformance-full: autobahn-setup
     zig build conformance-full
 
+[doc("Run the fast Autobahn client conformance suite")]
+conformance-client: autobahn-setup
+    zig build conformance-client
+
+[doc("Run the full Autobahn client conformance suite")]
+conformance-client-full: autobahn-setup
+    zig build conformance-client-full
+
 [doc("Run the fast Autobahn suite against the xev echo server")]
 conformance-xev: autobahn-setup
     zig build conformance-xev

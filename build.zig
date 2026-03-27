@@ -38,6 +38,21 @@ pub fn build(b: *std.Build) void {
     const echo_step = b.step("echo-server", "Run the Autobahn echo server");
     echo_step.dependOn(&echo_run.step);
 
+    const echo_client = b.addExecutable(.{
+        .name = "echo-client",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/echo_client.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "websocket", .module = mod },
+            },
+        }),
+    });
+    echo_client.root_module.linkSystemLibrary("zlib", .{ .use_pkg_config = .force });
+    b.installArtifact(echo_client);
+
     const examples_step = b.step("examples", "Build all examples");
 
     const blocking_echo = b.addExecutable(.{
@@ -67,6 +82,20 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(http_upgrade);
     examples_step.dependOn(&http_upgrade.step);
+
+    const blocking_client = b.addExecutable(.{
+        .name = "blocking-client",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/blocking-client.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "websocket", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(blocking_client);
+    examples_step.dependOn(&blocking_client.step);
 
     const run_autobahn = b.path("scripts/run-autobahn.nu").getPath(b);
 
@@ -98,6 +127,40 @@ pub fn build(b: *std.Build) void {
         "Run the full Autobahn conformance test suite",
     );
     conformance_full_step.dependOn(&conformance_full_script.step);
+
+    const run_autobahn_client = b.path("scripts/run-autobahn-client.nu").getPath(b);
+
+    const conformance_client_script = b.addSystemCommand(&.{
+        "nu",
+        run_autobahn_client,
+        b.getInstallPath(.bin, "echo-client"),
+        "9001",
+        "echo-client",
+        "fast",
+    });
+    conformance_client_script.step.dependOn(&b.addInstallArtifact(echo_client, .{}).step);
+
+    const conformance_client_step = b.step(
+        "conformance-client",
+        "Run the fast Autobahn client conformance suite",
+    );
+    conformance_client_step.dependOn(&conformance_client_script.step);
+
+    const conformance_client_full_script = b.addSystemCommand(&.{
+        "nu",
+        run_autobahn_client,
+        b.getInstallPath(.bin, "echo-client"),
+        "9001",
+        "echo-client",
+        "full",
+    });
+    conformance_client_full_script.step.dependOn(&b.addInstallArtifact(echo_client, .{}).step);
+
+    const conformance_client_full_step = b.step(
+        "conformance-client-full",
+        "Run the full Autobahn client conformance test suite",
+    );
+    conformance_client_full_step.dependOn(&conformance_client_full_script.step);
 
     if (b.lazyDependency("libxev", .{})) |xev_dep| {
         const xev_echo = b.addExecutable(.{

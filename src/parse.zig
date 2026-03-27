@@ -163,7 +163,8 @@ fn Parser(comptime is_server: bool) type {
                     if (len7 == 127 and payload_len >> 63 != 0) return error.InvalidPayloadLength;
 
                     if (opcode.isControl()) {
-                        if (payload_len > 125) return error.ControlFrameTooLong;
+                        if (payload_len > frame.max_control_payload_len)
+                            return error.ControlFrameTooLong;
                         if (!fin) return error.ControlFrameFragmented;
                     }
 

@@ -38,6 +38,8 @@ pub const ParseError = frame.ParseError;
 pub const WriteFrameOptions = frame.WriteFrameOptions;
 /// Buffer type for a base64-encoded `Sec-WebSocket-Accept` value.
 pub const AcceptKey = frame.AcceptKey;
+/// Maximum payload length for WebSocket control frames (ping, pong, close).
+pub const max_control_payload_len = frame.max_control_payload_len;
 const handshake = @import("handshake.zig");
 /// Compute the `Sec-WebSocket-Accept` header value for an upgrade response.
 pub const computeAcceptKey = handshake.computeAcceptKey;
@@ -68,7 +70,7 @@ pub fn writeFrame(
     options: WriteFrameOptions,
 ) Io.Writer.Error!void {
     assert(!options.opcode.isReserved());
-    assert(!options.opcode.isControl() or payload.len <= 125);
+    assert(!options.opcode.isControl() or payload.len <= frame.max_control_payload_len);
     assert(!options.opcode.isControl() or !options.compressed);
     const rsv: RsvBits = if (options.compressed) .permessage_deflate else .empty;
     const header: FrameHeader.Buffer = .init(.{

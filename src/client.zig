@@ -39,6 +39,8 @@ pub const ParseError = frame.ParseError;
 pub const WriteFrameOptions = frame.WriteFrameOptions;
 /// Generate a cryptographically random masking key.
 pub const generateMaskKey = frame.generateMaskKey;
+/// Maximum payload length for WebSocket control frames (ping, pong, close).
+pub const max_control_payload_len = frame.max_control_payload_len;
 const handshake = @import("handshake.zig");
 /// Compute the expected `Sec-WebSocket-Accept` header value for a client handshake.
 pub const computeAcceptKey = handshake.computeAcceptKey;
@@ -66,7 +68,7 @@ pub fn writeFrame(
     options: WriteFrameOptions,
 ) Io.Writer.Error!void {
     assert(!options.opcode.isReserved());
-    assert(!options.opcode.isControl() or payload.len <= 125);
+    assert(!options.opcode.isControl() or payload.len <= frame.max_control_payload_len);
     assert(!options.opcode.isControl() or !options.compressed);
     const mask_key = generateMaskKey();
     const rsv: RsvBits = if (options.compressed) .permessage_deflate else .empty;

@@ -97,8 +97,9 @@ pub fn BoundedBuffer(comptime max_capacity: comptime_int) type {
 pub const max_header_len = 14;
 pub const HeaderBuffer = BoundedBuffer(max_header_len);
 
-const max_control_payload_len = 125;
-/// Fixed-capacity buffer for accumulating control frame payloads (max 125 bytes per RFC 6455).
+/// Maximum payload length for control frames (RFC 6455 Section 5.5).
+pub const max_control_payload_len = 125;
+/// Fixed-capacity buffer for accumulating control frame payloads.
 pub const ControlBuffer = BoundedBuffer(max_control_payload_len);
 
 /// WebSocket frame opcode (RFC 6455 Section 5.2).
