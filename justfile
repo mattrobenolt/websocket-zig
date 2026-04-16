@@ -23,7 +23,7 @@ check: fmt-check lint
 
 [doc("Build all examples")]
 examples:
-    zig build examples
+    zig build examples -Dxev
 
 [doc("Install the native Autobahn TestSuite into the local PyPy environment")]
 autobahn-setup:
@@ -55,7 +55,7 @@ conformance-client-full: autobahn-setup
 
 [doc("Run the fast Autobahn suite against the xev echo server")]
 conformance-xev: autobahn-setup
-    zig build conformance-xev
+    zig build conformance-xev -Dxev
 
 [doc("Run all checks: format, lint, test, full conformance")]
 ci: check test conformance-full
