@@ -162,36 +162,40 @@ pub fn build(b: *std.Build) void {
     );
     conformance_client_full_step.dependOn(&conformance_client_full_script.step);
 
-    if (b.lazyDependency("libxev", .{})) |xev_dep| {
-        const xev_echo = b.addExecutable(.{
-            .name = "xev-echo",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("examples/xev-echo.zig"),
-                .target = target,
-                .optimize = optimize,
-                .imports = &.{
-                    .{ .name = "websocket", .module = mod },
-                    .{ .name = "xev", .module = xev_dep.module("xev") },
-                },
-            }),
-        });
-        const xev_install = b.addInstallArtifact(xev_echo, .{});
-        examples_step.dependOn(&xev_install.step);
+    const xev_echo = b.addExecutable(.{
+        .name = "xev-echo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/xev-echo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "websocket", .module = mod },
+            },
+        }),
+    });
+    const xev_install = b.addInstallArtifact(xev_echo, .{});
+    examples_step.dependOn(&xev_install.step);
 
-        const xev_conformance = b.addSystemCommand(&.{
-            "nu",
-            run_autobahn,
-            b.getInstallPath(.bin, "xev-echo"),
-            "9003",
-            "xev-echo",
-            "fast",
-        });
-        xev_conformance.step.dependOn(&xev_install.step);
+    const xev_conformance = b.addSystemCommand(&.{
+        "nu",
+        run_autobahn,
+        b.getInstallPath(.bin, "xev-echo"),
+        "9003",
+        "xev-echo",
+        "fast",
+    });
+    xev_conformance.step.dependOn(&xev_install.step);
 
-        const xev_conf_step = b.step(
-            "conformance-xev",
-            "Run Autobahn against xev echo server",
-        );
-        xev_conf_step.dependOn(&xev_conformance.step);
+    const xev_conf_step = b.step(
+        "conformance-xev",
+        "Run Autobahn against xev echo server",
+    );
+    xev_conf_step.dependOn(&xev_conformance.step);
+
+    const pull_xev = b.option(bool, "xev", "set this if libxev need to be used") orelse false;
+    if (pull_xev) {
+        if (b.lazyDependency("libxev", .{})) |xev_dep| {
+            xev_echo.root_module.addImport("xev", xev_dep.module("xev"));
+        }
     }
 }
