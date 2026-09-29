@@ -18,41 +18,47 @@ const print = std.debug.print;
 
 const ws = @import("websocket").server;
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const allocator = debug_allocator.allocator();
 
-    const port = parsePort();
-    const address: std.net.Address = try .resolveIp("127.0.0.1", port);
-    var server = try address.listen(.{});
-    defer server.deinit();
+    // std.Io.net requires an Io instance; this example is single-threaded
+    // blocking I/O, so a plain Io.Threaded is the honest implementation.
+    var threaded: Io.Threaded = .init(allocator, .{ .environ = init.environ });
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    const port = parsePort(init.args);
+    const address: std.Io.net.IpAddress = try .parseIp4("127.0.0.1", port);
+    var server = try address.listen(io, .{});
+    defer server.deinit(io);
 
     print("listening on 127.0.0.1:{d}\n", .{port});
 
     // Accept loop — handle one connection at a time.
     while (true) {
-        const conn = server.accept() catch |err| {
+        const stream = server.accept(io) catch |err| {
             print("accept error: {}\n", .{err});
             continue;
         };
 
-        handleConnection(allocator, conn.stream) catch |err| {
+        handleConnection(allocator, io, stream) catch |err| {
             print("connection error: {}\n", .{err});
         };
     }
 }
 
-fn handleConnection(gpa: Allocator, stream: std.net.Stream) !void {
-    defer stream.close();
+fn handleConnection(gpa: Allocator, io: Io, stream: std.Io.net.Stream) !void {
+    defer stream.close(io);
 
     // Wrap the raw TCP stream with buffered reader/writer.
     // The buffers are stack-allocated — no heap needed for IO.
     var read_buf: [4096]u8 = undefined;
     var write_buf: [4096]u8 = undefined;
-    var stream_reader = stream.reader(&read_buf);
-    var stream_writer = stream.writer(&write_buf);
-    const reader = stream_reader.interface();
+    var stream_reader = stream.reader(io, &read_buf);
+    var stream_writer = stream.writer(io, &write_buf);
+    const reader = &stream_reader.interface;
     const writer = &stream_writer.interface;
 
     // --- Step 1: HTTP Upgrade Handshake ---
@@ -67,7 +73,7 @@ fn handleConnection(gpa: Allocator, stream: std.net.Stream) !void {
         reader.fill(1) catch return;
         const hdr_data = reader.buffered();
         if (hdr_data.len == 0) return;
-        if (mem.indexOf(u8, hdr_data, "\r\n\r\n")) |end| {
+        if (mem.find(u8, hdr_data, "\r\n\r\n")) |end| {
             const header_end = end + 4;
             const key = extractWebSocketKey(hdr_data[0..header_end]) orelse return;
 
@@ -175,10 +181,10 @@ const EchoHandler = struct {
     }
 };
 
-fn parsePort() u16 {
-    var args = std.process.args();
-    _ = args.next();
-    const port_str = args.next() orelse return 8080;
+fn parsePort(args: std.process.Args) u16 {
+    var it = args.iterate();
+    _ = it.next();
+    const port_str = it.next() orelse return 8080;
     return std.fmt.parseInt(u16, port_str, 10) catch 8080;
 }
 
@@ -186,7 +192,7 @@ fn extractWebSocketKey(request: []const u8) ?[]const u8 {
     const needle = "Sec-WebSocket-Key: ";
     var pos: usize = 0;
     while (pos < request.len) {
-        const line_end = mem.indexOf(u8, request[pos..], "\r\n") orelse
+        const line_end = mem.find(u8, request[pos..], "\r\n") orelse
             (request.len - pos);
         const line = request[pos .. pos + line_end];
         if (std.ascii.startsWithIgnoreCase(line, needle)) {

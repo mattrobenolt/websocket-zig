@@ -14,21 +14,27 @@ const print = std.debug.print;
 
 const ws = @import("websocket").client;
 
-pub fn main() !void {
-    const port = parsePort();
-    const stream = try tcpConnect(port);
-    defer stream.close();
+pub fn main(init: std.process.Init.Minimal) !void {
+    // Single-threaded blocking I/O; entropy and networking both come from
+    // this Io instance (std.crypto.random was removed in 0.16).
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    const port = parsePort(init.args);
+    const stream = try tcpConnect(io, port);
+    defer stream.close(io);
 
     var read_buf: [4096]u8 = undefined;
     var write_buf: [4096]u8 = undefined;
-    var stream_reader = stream.reader(&read_buf);
-    var stream_writer = stream.writer(&write_buf);
-    const reader = stream_reader.interface();
+    var stream_reader = stream.reader(io, &read_buf);
+    var stream_writer = stream.writer(io, &write_buf);
+    const reader = &stream_reader.interface;
     const writer = &stream_writer.interface;
 
     // --- Client Handshake ---
     var key_raw: [16]u8 = undefined;
-    std.crypto.random.bytes(&key_raw);
+    try std.Io.randomSecure(io, &key_raw);
     var key_b64: [24]u8 = undefined;
     _ = std.base64.standard.Encoder.encode(&key_b64, &key_raw);
 
@@ -50,7 +56,7 @@ pub fn main() !void {
     while (true) {
         reader.fill(1) catch return error.ConnectionClosed;
         const buf = reader.buffered();
-        if (mem.indexOf(u8, buf, "\r\n\r\n")) |end| {
+        if (mem.find(u8, buf, "\r\n\r\n")) |end| {
             const header_end = end + 4;
             const headers = buf[0..header_end];
 
@@ -121,7 +127,7 @@ pub fn main() !void {
 fn extractHeader(request: []const u8, needle: []const u8) ?[]const u8 {
     var pos: usize = 0;
     while (pos < request.len) {
-        const line_end = mem.indexOf(u8, request[pos..], "\r\n") orelse
+        const line_end = mem.find(u8, request[pos..], "\r\n") orelse
             (request.len - pos);
         const line = request[pos .. pos + line_end];
         if (std.ascii.startsWithIgnoreCase(line, needle)) {
@@ -132,14 +138,14 @@ fn extractHeader(request: []const u8, needle: []const u8) ?[]const u8 {
     return null;
 }
 
-fn tcpConnect(port: u16) !std.net.Stream {
-    const address: std.net.Address = try .resolveIp("127.0.0.1", port);
-    return std.net.tcpConnectToAddress(address);
+fn tcpConnect(io: std.Io, port: u16) !std.Io.net.Stream {
+    const address: std.Io.net.IpAddress = try .parseIp4("127.0.0.1", port);
+    return address.connect(io, .{ .mode = .stream });
 }
 
-fn parsePort() u16 {
-    var args = std.process.args();
-    _ = args.next();
-    const port_str = args.next() orelse return 8080;
+fn parsePort(args: std.process.Args) u16 {
+    var it = args.iterate();
+    _ = it.next();
+    const port_str = it.next() orelse return 8080;
     return std.fmt.parseInt(u16, port_str, 10) catch 8080;
 }

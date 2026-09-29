@@ -2,11 +2,13 @@
     .name = .websocket,
     .version = "0.0.0",
     .fingerprint = 0x42ce80b95e1d4450,
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .libxev = .{
-            .url = "https://github.com/mitchellh/libxev/archive/d398cba9bf711fa4dd21c48bf73d25e4d8986408.tar.gz",
-            .hash = "libxev-0.0.0-86vtc689EwAjQWysidPm9NKkAwwUNByiE3kZTg_xu0Hp",
+            // mattrobenolt fork, zig-0.16 branch: upstream is unmaintained
+            // and has no 0.16 port.
+            .url = "https://github.com/mattrobenolt/libxev/archive/e0da474516d8ab5cdebb908d875fba2139e2e992.tar.gz",
+            .hash = "libxev-0.0.0-86vtc5ehBwDOZaMX_9QpMemn8giO-hXdU4yuJA-9yqcA",
             .lazy = true,
         },
     },

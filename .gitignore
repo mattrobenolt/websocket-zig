@@ -3,3 +3,6 @@ zig-out/
 .direnv/
 .autobahn/
 test/autobahn/reports/
+
+# Zig 0.16 project-local package fetch dir
+zig-pkg/

@@ -9,9 +9,16 @@ pub const MaskKey = [4]u8;
 
 /// Generate a cryptographically random mask key.
 /// RFC 6455 Section 5.3 requires unpredictable keys to prevent proxy cache poisoning.
+///
+/// std.crypto.random was removed in Zig 0.16; entropy now requires an Io.
+/// The frame-writing API is synchronous and 4 bytes of getrandom per frame
+/// does not justify threading an Io through every caller, so this uses the
+/// global single-threaded instance deliberately (no concurrency needed for
+/// a randomSecure syscall).
 pub fn generateMaskKey() MaskKey {
     var key: MaskKey = undefined;
-    std.crypto.random.bytes(&key);
+    const io = std.Io.Threaded.global_single_threaded.io();
+    std.Io.randomSecure(io, &key) catch unreachable; // getrandom cannot fail for 4 bytes
     return key;
 }
 
