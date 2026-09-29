@@ -157,9 +157,9 @@ test "UpgradeResponse: produces valid HTTP 101" {
     const response = resp.constSlice();
 
     try testing.expect(mem.startsWith(u8, response, "HTTP/1.1 101 Switching Protocols\r\n"));
-    try testing.expect(mem.indexOf(u8, response, "Upgrade: websocket\r\n") != null);
-    try testing.expect(mem.indexOf(u8, response, "Connection: Upgrade\r\n") != null);
-    try testing.expect(mem.indexOf(u8, response, "Sec-WebSocket-Accept: ") != null);
+    try testing.expect(mem.find(u8, response, "Upgrade: websocket\r\n") != null);
+    try testing.expect(mem.find(u8, response, "Connection: Upgrade\r\n") != null);
+    try testing.expect(mem.find(u8, response, "Sec-WebSocket-Accept: ") != null);
     try testing.expect(mem.endsWith(u8, response, "\r\n\r\n"));
 }
 
@@ -167,8 +167,8 @@ test "UpgradeResponse: correct accept value" {
     const resp: UpgradeResponse = .init(.{ .key = "dGhlIHNhbXBsZSBub25jZQ==" });
     const response = resp.constSlice();
 
-    const accept_start = mem.indexOf(u8, response, "Sec-WebSocket-Accept: ").? + 22;
-    const accept_end = mem.indexOf(u8, response[accept_start..], "\r\n").?;
+    const accept_start = mem.find(u8, response, "Sec-WebSocket-Accept: ").? + 22;
+    const accept_end = mem.find(u8, response[accept_start..], "\r\n").?;
     const accept = response[accept_start..][0..accept_end];
     try testing.expectEqualStrings("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", accept);
 }
@@ -188,7 +188,7 @@ test "UpgradeResponse: permessage-deflate" {
 
     try testing.expect(mem.startsWith(u8, response, "HTTP/1.1 101 Switching Protocols\r\n"));
     const ext_hdr = "Sec-WebSocket-Extensions: permessage-deflate\r\n";
-    try testing.expect(mem.indexOf(u8, response, ext_hdr) != null);
+    try testing.expect(mem.find(u8, response, ext_hdr) != null);
     try testing.expect(mem.endsWith(u8, response, "\r\n\r\n"));
 }
 
@@ -208,5 +208,5 @@ test "UpgradeResponse: permessage-deflate with params" {
         "Sec-WebSocket-Extensions: permessage-deflate" ++
         "; server_no_context_takeover" ++
         "; client_no_context_takeover\r\n";
-    try testing.expect(mem.indexOf(u8, response, ext_hdr) != null);
+    try testing.expect(mem.find(u8, response, ext_hdr) != null);
 }

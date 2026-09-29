@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
     flake-parts.url = "github:hercules-ci/flake-parts";
     mattware = {
       url = "github:mattrobenolt/nixpkgs";
@@ -44,8 +44,8 @@
 
           devShells.default = pkgs.mkShell {
             packages = with pkgs; [
-              zig_0_15
-              zls_0_15
+              zig_0_16
+              zls_0_16
               ziglint
               zigdoc
               just

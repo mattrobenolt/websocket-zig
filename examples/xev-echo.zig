@@ -114,7 +114,7 @@ const Connection = struct {
 
     /// Allocate a Connection from the pool and initialize it.
     fn create(gpa: Allocator, socket: xev.TCP) !*Connection {
-        const conn = try connection_pool.create();
+        const conn = try connection_pool.create(gpa);
         conn.init(gpa, socket);
         return conn;
     }
@@ -267,7 +267,8 @@ const Connection = struct {
                 // write side of the socket, then drain reads until EOF.
                 // This is the clean close handshake per RFC 6455 §7.1.1.
                 // ziglint-ignore: Z026
-                posix.shutdown(self.socket.fd, .send) catch {};
+                // Raw syscall: std.posix.shutdown was removed in 0.16.
+                _ = std.os.linux.shutdown(self.socket.fd, std.os.linux.SHUT.WR);
                 self.state = .draining;
                 self.submitRead(loop);
             },
@@ -297,7 +298,7 @@ const Connection = struct {
         try hs.appendSlice(self.allocator, self.read_buf[0..n]);
 
         // Look for the end of HTTP headers.
-        const end = mem.indexOf(u8, hs.items, "\r\n\r\n") orelse {
+        const end = mem.find(u8, hs.items, "\r\n\r\n") orelse {
             // Haven't received the full headers yet — read more.
             self.submitRead(loop);
             return;
@@ -452,7 +453,7 @@ fn onAccept(
     return .rearm;
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     var allocator = debug_allocator.allocator();
@@ -460,15 +461,17 @@ pub fn main() !void {
     // Initialize the connection pool with the general-purpose allocator.
     // The pool recycles Connection structs so we don't hit the allocator
     // on every accept/close cycle.
-    connection_pool = .init(allocator);
-    defer connection_pool.deinit();
+    // 0.16: the default (growable) MemoryPool takes an initial capacity and
+    // threads the allocator through deinit/create.
+    connection_pool = try .initCapacity(allocator, 64);
+    defer connection_pool.deinit(allocator);
 
     var loop: xev.Loop = try .init(.{});
     defer loop.deinit();
 
-    const port = parsePort();
-    const address: std.net.Address = try .resolveIp("127.0.0.1", port);
-    var server: xev.TCP = try .init(address);
+    const port = parsePort(init.args);
+    const address: std.Io.net.Ip4Address = try .parse("127.0.0.1", port);
+    var server: xev.TCP = try .init();
     try server.bind(address);
     try server.listen(128);
 
@@ -484,10 +487,10 @@ pub fn main() !void {
     try loop.run(.until_done);
 }
 
-fn parsePort() u16 {
-    var args = std.process.args();
-    _ = args.next();
-    const port_str = args.next() orelse return 8080;
+fn parsePort(args: std.process.Args) u16 {
+    var it = args.iterate();
+    _ = it.next();
+    const port_str = it.next() orelse return 8080;
     return std.fmt.parseInt(u16, port_str, 10) catch 8080;
 }
 
@@ -498,7 +501,7 @@ fn extractWebSocketKey(request: []const u8) ?[]const u8 {
     const needle = "Sec-WebSocket-Key: ";
     var pos: usize = 0;
     while (pos < request.len) {
-        const line_end = mem.indexOf(u8, request[pos..], "\r\n") orelse
+        const line_end = mem.find(u8, request[pos..], "\r\n") orelse
             (request.len - pos);
         const line = request[pos .. pos + line_end];
         if (std.ascii.startsWithIgnoreCase(line, needle)) {

@@ -13,9 +13,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
-const net = std.net;
-const Stream = net.Stream;
-const Address = net.Address;
+const Stream = std.Io.net.Stream;
+const Address = std.Io.net.IpAddress;
 const mem = std.mem;
 const print = std.debug.print;
 
@@ -24,25 +23,29 @@ const DeflateConfig = ws.Extension.DeflateConfig;
 
 const c = @cImport(@cInclude("zlib.h"));
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const allocator = debug_allocator.allocator();
 
-    const port = parsePort();
-    const address: Address = try .resolveIp("127.0.0.1", port);
+    var threaded: std.Io.Threaded = .init(allocator, .{ .environ = init.environ });
+    defer threaded.deinit();
+    const io = threaded.io();
 
-    var server = try address.listen(.{});
-    defer server.deinit();
+    const port = parsePort(init.args);
+    const address: Address = try .parseIp4("127.0.0.1", port);
+
+    var server = try address.listen(io, .{});
+    defer server.deinit(io);
 
     print("echo server listening on 127.0.0.1:{d}\n", .{port});
 
     while (true) {
-        const conn = server.accept() catch |err| {
+        const stream = server.accept(io) catch |err| {
             print("accept error: {}\n", .{err});
             continue;
         };
-        handleConnection(allocator, conn.stream) catch |err| {
+        handleConnection(allocator, io, stream) catch |err| {
             print("connection error: {}\n", .{err});
         };
     }
@@ -52,21 +55,21 @@ const HandshakeResult = struct {
     deflate: ?DeflateConfig,
 };
 
-fn handleConnection(allocator: Allocator, stream: Stream) !void {
-    defer stream.close();
+fn handleConnection(allocator: Allocator, io: std.Io, stream: Stream) !void {
+    defer stream.close(io);
 
     var read_buf: [8192]u8 = undefined;
     var write_buf: [8192]u8 = undefined;
-    var stream_reader = stream.reader(&read_buf);
-    var stream_writer = stream.writer(&write_buf);
-    const reader = stream_reader.interface();
+    var stream_reader = stream.reader(io, &read_buf);
+    var stream_writer = stream.writer(io, &write_buf);
+    const reader = &stream_reader.interface;
     const writer = &stream_writer.interface;
 
     while (true) {
         reader.fill(1) catch return;
         const hdr_data = reader.buffered();
         if (hdr_data.len == 0) return;
-        if (mem.indexOf(u8, hdr_data, "\r\n\r\n")) |end| {
+        if (mem.find(u8, hdr_data, "\r\n\r\n")) |end| {
             const header_end = end + 4;
             const headers = hdr_data[0..header_end];
             const key = extractWebSocketKey(headers) orelse return;
@@ -95,14 +98,14 @@ fn negotiateHandshake(headers: []const u8) HandshakeResult {
         "Sec-WebSocket-Extensions: ",
     ) orelse return .{ .deflate = null };
 
-    if (mem.indexOf(u8, ext_value, "permessage-deflate") == null)
+    if (mem.find(u8, ext_value, "permessage-deflate") == null)
         return .{ .deflate = null };
 
     var cfg: DeflateConfig = .init;
 
-    if (mem.indexOf(u8, ext_value, "server_no_context_takeover") != null)
+    if (mem.find(u8, ext_value, "server_no_context_takeover") != null)
         cfg.server_no_context_takeover = true;
-    if (mem.indexOf(u8, ext_value, "client_no_context_takeover") != null)
+    if (mem.find(u8, ext_value, "client_no_context_takeover") != null)
         cfg.client_no_context_takeover = true;
 
     if (extractParamValue(ext_value, "server_max_window_bits")) |v|
@@ -117,7 +120,7 @@ fn extractParamValue(
     ext_value: []const u8,
     param: []const u8,
 ) ?ws.Extension.WindowBits {
-    const idx = mem.indexOf(u8, ext_value, param) orelse return null;
+    const idx = mem.find(u8, ext_value, param) orelse return null;
     const after = ext_value[idx + param.len ..];
     if (after.len == 0 or after[0] != '=') return null;
     const rest = after[1..];
@@ -127,7 +130,7 @@ fn extractParamValue(
     if (end == 0) return null;
 
     const val = std.fmt.parseInt(u4, rest[0..end], 10) catch return null;
-    return std.meta.intToEnum(ws.Extension.WindowBits, val) catch null;
+    return std.enums.fromInt(ws.Extension.WindowBits, val);
 }
 
 const sync_flush_suffix = [_]u8{ 0x00, 0x00, 0xff, 0xff };
@@ -379,7 +382,7 @@ fn extractWebSocketKey(request: []const u8) ?[]const u8 {
 fn extractHeader(request: []const u8, needle: []const u8) ?[]const u8 {
     var pos: usize = 0;
     while (pos < request.len) {
-        const line_end = mem.indexOf(u8, request[pos..], "\r\n") orelse
+        const line_end = mem.find(u8, request[pos..], "\r\n") orelse
             (request.len - pos);
         const line = request[pos .. pos + line_end];
         if (std.ascii.startsWithIgnoreCase(line, needle)) {
@@ -390,9 +393,9 @@ fn extractHeader(request: []const u8, needle: []const u8) ?[]const u8 {
     return null;
 }
 
-fn parsePort() u16 {
-    var args = std.process.args();
-    _ = args.next();
-    const port_str = args.next() orelse return 9002;
+fn parsePort(args: std.process.Args) u16 {
+    var it = args.iterate();
+    _ = it.next();
+    const port_str = it.next() orelse return 9002;
     return std.fmt.parseInt(u16, port_str, 10) catch 9002;
 }

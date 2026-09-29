@@ -8,9 +8,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
-const net = std.net;
-const Stream = net.Stream;
-const Address = net.Address;
+const Stream = std.Io.net.Stream;
+const Address = std.Io.net.IpAddress;
 const mem = std.mem;
 const print = std.debug.print;
 
@@ -19,15 +18,19 @@ const DeflateConfig = ws.Extension.DeflateConfig;
 
 const c = @cImport(@cInclude("zlib.h"));
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const allocator = debug_allocator.allocator();
 
-    const args = parseArgs();
+    var threaded: Io.Threaded = .init(allocator, .{ .environ = init.environ });
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    const args = parseArgs(init.args);
 
     print("getting case count from fuzzingserver on port {d}...\n", .{args.port});
-    const case_count = try getCaseCount(args.port);
+    const case_count = try getCaseCount(io, args.port);
     print("running {d} test cases as \"{s}\"...\n", .{ case_count, args.agent });
 
     var i: u32 = 1;
@@ -35,28 +38,28 @@ pub fn main() !void {
         if (i % 100 == 0 or i == 1 or i == case_count) {
             print("  case {d}/{d}\n", .{ i, case_count });
         }
-        runCase(allocator, args.port, i, args.agent) catch |err| {
+        runCase(allocator, io, args.port, i, args.agent) catch |err| {
             print("  case {d} error: {s}\n", .{ i, @errorName(err) });
         };
     }
 
     print("updating reports...\n", .{});
-    try updateReports(args.port, args.agent);
+    try updateReports(io, args.port, args.agent);
     print("done.\n", .{});
 }
 
-fn getCaseCount(port: u16) !u32 {
-    const stream = try tcpConnect(port);
-    defer stream.close();
+fn getCaseCount(io: Io, port: u16) !u32 {
+    const stream = try tcpConnect(io, port);
+    defer stream.close(io);
 
     var read_buf: [4096]u8 = undefined;
     var write_buf: [4096]u8 = undefined;
-    var stream_reader = stream.reader(&read_buf);
-    var stream_writer = stream.writer(&write_buf);
-    const reader = stream_reader.interface();
+    var stream_reader = stream.reader(io, &read_buf);
+    var stream_writer = stream.writer(io, &write_buf);
+    const reader = &stream_reader.interface;
     const writer = &stream_writer.interface;
 
-    _ = try doHandshake(reader, writer, port, "/getCaseCount", false);
+    _ = try doHandshake(io, reader, writer, port, "/getCaseCount", false);
 
     var handler: ws.FrameHandler = .init(.{});
     var count_buf: [32]u8 = undefined;
@@ -103,15 +106,15 @@ fn getCaseCount(port: u16) !u32 {
     }
 }
 
-fn runCase(allocator: Allocator, port: u16, case_num: u32, agent: []const u8) !void {
-    const stream = try tcpConnect(port);
-    defer stream.close();
+fn runCase(allocator: Allocator, io: Io, port: u16, case_num: u32, agent: []const u8) !void {
+    const stream = try tcpConnect(io, port);
+    defer stream.close(io);
 
     var read_buf: [8192]u8 = undefined;
     var write_buf: [8192]u8 = undefined;
-    var stream_reader = stream.reader(&read_buf);
-    var stream_writer = stream.writer(&write_buf);
-    const reader = stream_reader.interface();
+    var stream_reader = stream.reader(io, &read_buf);
+    var stream_writer = stream.writer(io, &write_buf);
+    const reader = &stream_reader.interface;
     const writer = &stream_writer.interface;
 
     var path_buf: [256]u8 = undefined;
@@ -119,29 +122,29 @@ fn runCase(allocator: Allocator, port: u16, case_num: u32, agent: []const u8) !v
         case_num, agent,
     }) catch return error.PathTooLong;
 
-    const hs = try doHandshake(reader, writer, port, path, true);
+    const hs = try doHandshake(io, reader, writer, port, path, true);
 
     var echo: EchoHandler = try .init(allocator, hs.deflate);
     defer echo.deinit(allocator);
     echo.run(allocator, reader, writer) catch return;
 }
 
-fn updateReports(port: u16, agent: []const u8) !void {
-    const stream = try tcpConnect(port);
-    defer stream.close();
+fn updateReports(io: Io, port: u16, agent: []const u8) !void {
+    const stream = try tcpConnect(io, port);
+    defer stream.close(io);
 
     var read_buf: [4096]u8 = undefined;
     var write_buf: [4096]u8 = undefined;
-    var stream_reader = stream.reader(&read_buf);
-    var stream_writer = stream.writer(&write_buf);
-    const reader = stream_reader.interface();
+    var stream_reader = stream.reader(io, &read_buf);
+    var stream_writer = stream.writer(io, &write_buf);
+    const reader = &stream_reader.interface;
     const writer = &stream_writer.interface;
 
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "/updateReports?agent={s}", .{agent}) catch
         return error.PathTooLong;
 
-    _ = try doHandshake(reader, writer, port, path, false);
+    _ = try doHandshake(io, reader, writer, port, path, false);
 
     var handler: ws.FrameHandler = .init(.{});
     while (true) {
@@ -183,6 +186,7 @@ const HandshakeResult = struct {
 };
 
 fn doHandshake(
+    io: Io,
     reader: *Io.Reader,
     writer: *Io.Writer,
     port: u16,
@@ -190,7 +194,7 @@ fn doHandshake(
     offer_deflate: bool,
 ) !HandshakeResult {
     var key_raw: [16]u8 = undefined;
-    std.crypto.random.bytes(&key_raw);
+    try std.Io.randomSecure(io, &key_raw);
     var key_b64: [24]u8 = undefined;
     _ = std.base64.standard.Encoder.encode(&key_b64, &key_raw);
 
@@ -220,7 +224,7 @@ fn doHandshake(
         reader.fill(1) catch return error.ConnectionClosed;
         const buf = reader.buffered();
         if (buf.len == 0) return error.ConnectionClosed;
-        if (mem.indexOf(u8, buf, "\r\n\r\n")) |end| {
+        if (mem.find(u8, buf, "\r\n\r\n")) |end| {
             const header_end = end + 4;
             const headers = buf[0..header_end];
 
@@ -247,12 +251,12 @@ fn doHandshake(
 
 fn negotiateDeflate(headers: []const u8) ?DeflateConfig {
     const ext_value = extractHeader(headers, "Sec-WebSocket-Extensions: ") orelse return null;
-    if (mem.indexOf(u8, ext_value, "permessage-deflate") == null) return null;
+    if (mem.find(u8, ext_value, "permessage-deflate") == null) return null;
 
     var cfg: DeflateConfig = .init;
-    if (mem.indexOf(u8, ext_value, "server_no_context_takeover") != null)
+    if (mem.find(u8, ext_value, "server_no_context_takeover") != null)
         cfg.server_no_context_takeover = true;
-    if (mem.indexOf(u8, ext_value, "client_no_context_takeover") != null)
+    if (mem.find(u8, ext_value, "client_no_context_takeover") != null)
         cfg.client_no_context_takeover = true;
     if (extractParamValue(ext_value, "server_max_window_bits")) |v|
         cfg.server_max_window_bits = v;
@@ -265,7 +269,7 @@ fn extractParamValue(
     ext_value: []const u8,
     param: []const u8,
 ) ?ws.Extension.WindowBits {
-    const idx = mem.indexOf(u8, ext_value, param) orelse return null;
+    const idx = mem.find(u8, ext_value, param) orelse return null;
     const after = ext_value[idx + param.len ..];
     if (after.len == 0 or after[0] != '=') return null;
     const rest = after[1..];
@@ -275,7 +279,7 @@ fn extractParamValue(
     if (end_pos == 0) return null;
 
     const val = std.fmt.parseInt(u4, rest[0..end_pos], 10) catch return null;
-    return std.meta.intToEnum(ws.Extension.WindowBits, val) catch null;
+    return std.enums.fromInt(ws.Extension.WindowBits, val);
 }
 
 const sync_flush_suffix = [_]u8{ 0x00, 0x00, 0xff, 0xff };
@@ -534,7 +538,7 @@ const EchoHandler = struct {
 fn extractHeader(request: []const u8, needle: []const u8) ?[]const u8 {
     var pos: usize = 0;
     while (pos < request.len) {
-        const line_end = mem.indexOf(u8, request[pos..], "\r\n") orelse
+        const line_end = mem.find(u8, request[pos..], "\r\n") orelse
             (request.len - pos);
         const line = request[pos .. pos + line_end];
         if (std.ascii.startsWithIgnoreCase(line, needle)) {
@@ -545,9 +549,9 @@ fn extractHeader(request: []const u8, needle: []const u8) ?[]const u8 {
     return null;
 }
 
-fn tcpConnect(port: u16) !Stream {
-    const address: Address = try .resolveIp("127.0.0.1", port);
-    return net.tcpConnectToAddress(address);
+fn tcpConnect(io: Io, port: u16) !Stream {
+    const address: Address = try .parseIp4("127.0.0.1", port);
+    return address.connect(io, .{ .mode = .stream });
 }
 
 const Args = struct {
@@ -555,11 +559,11 @@ const Args = struct {
     agent: []const u8,
 };
 
-fn parseArgs() Args {
-    var args = std.process.args();
-    _ = args.next();
-    const port_str = args.next() orelse "9001";
-    const agent = args.next() orelse "echo-client";
+fn parseArgs(args: std.process.Args) Args {
+    var it = args.iterate();
+    _ = it.next();
+    const port_str = it.next() orelse "9001";
+    const agent = it.next() orelse "echo-client";
     return .{
         .port = std.fmt.parseInt(u16, port_str, 10) catch 9001,
         .agent = agent,
